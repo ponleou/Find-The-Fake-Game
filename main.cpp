@@ -29,7 +29,7 @@ struct tile_data
 
 struct coordinate
 {
-    int x, y;
+    double x, y;
 };
 
 // struct for different rooms
@@ -46,7 +46,7 @@ struct room_data
     color color_pattern[3]; // 0 and 1 is the floor checkers color pattern, 2 is the walls
     int size_y = ROOM_HEIGHT;
     int size_x = ROOM_WIDTH;
-    coordinate spawn_coords = {(int)ROOM_WIDTH / 2, (int)ROOM_HEIGHT - 3}; // -1 for the wall, -2 for the character's height
+    coordinate spawn_coords = {(ROOM_WIDTH - 1) / 2, (ROOM_HEIGHT - 1) - 2}; // -2 because one for the wall, one for the leg (player coord is at the head)
     room_properties_data properties;
 };
 
@@ -54,13 +54,15 @@ struct room_data
 struct player_data
 {
     int health;
+    int speed;
+    coordinate position;
     rectangle hitbox;
     bitmap player_model;
+    bool model_facing_right = true;
     double model_scaling;
-    coordinate coords;
 };
 
-int coordinates_to_pixel(int coord)
+double coordinates_to_pixel(double coord)
 {
     return coord * get_tile_size();
 }
@@ -77,7 +79,7 @@ void build_room(room_data &room)
 
             if (x == 0 || x == size_x - 1 || y == 0 || y == size_y - 1)
             {
-                room.floor_array[y][x].tile_color = room.color_pattern[3];
+                room.floor_array[y][x].tile_color = room.color_pattern[2];
                 room.floor_array[y][x].passable = false;
                 continue;
             }
@@ -115,10 +117,10 @@ void build_npc_room(room_data &room)
 
 void draw_tile(const room_data &room, const coordinate &coord)
 {
-    int x = coord.x;
-    int y = coord.y;
+    double x = coord.x;
+    double y = coord.y;
 
-    const tile_data &tile = room.floor_array[y][x];
+    const tile_data &tile = room.floor_array[(int)y][(int)x];
     color tile_color = tile.tile_color;
     int pos_x = get_tile_size() * x;
     int pos_y = get_tile_size() * y;
@@ -132,7 +134,7 @@ void draw_floor(const room_data &room)
     {
         for (int x = 0; x < room.size_x; x++)
         {
-            coordinate tile_coorindate = {x, y};
+            coordinate tile_coorindate = {(double)x, (double)y};
             draw_tile(room, tile_coorindate);
         }
     }
@@ -144,10 +146,18 @@ void draw_room(const room_data &room)
     draw_floor(room);
 }
 
+void update_player_hitbox(player_data &player)
+{
+    double model_width = bitmap_width(player.player_model);
+    double model_height = bitmap_height(player.player_model);
+    player.hitbox = {(double)player.position.x, (double)player.position.y, model_width * player.model_scaling, model_height * player.model_scaling};
+}
+
 void load_player(player_data &player, const room_data &room)
 {
-    player.player_model = load_bitmap("player_idle", "./image_data/player_data/player_idle.png");
-    player.health = 10; // TODO: change
+    player.player_model = load_bitmap("player_idle", "./image_data/player/player_idle.png");
+    player.health = 10;                 // TODO: change
+    player.speed = 5 * get_tile_size(); // tiles per second   // TODO: change
 
     double model_width = bitmap_width(player.player_model);
     double model_height = bitmap_height(player.player_model);
@@ -162,10 +172,8 @@ void load_player(player_data &player, const room_data &room)
         player.model_scaling = (double)get_tile_size() / model_height;
     }
 
-    player.coords = room.spawn_coords;
-
-    player.hitbox = {(double)player.coords.x, (double)player.coords.y, model_width * player.model_scaling, model_height * player.model_scaling};
-    write_line(std::to_string(player.coords.y));
+    player.position = {coordinates_to_pixel(room.spawn_coords.x), coordinates_to_pixel(room.spawn_coords.y)};
+    update_player_hitbox(player);
 }
 
 void draw_player(const player_data &player)
@@ -174,14 +182,54 @@ void draw_player(const player_data &player)
     double model_height = bitmap_height(player.player_model);
     double scaling = player.model_scaling;
 
-    int pos_x = coordinates_to_pixel(player.coords.x) + ((model_width * scaling) - model_width) / 2;
-    int pos_y = coordinates_to_pixel(player.coords.y) + ((model_height * scaling) - model_height) / 2;
-    draw_bitmap(player.player_model, pos_x, pos_y, option_scale_bmp(player.model_scaling, player.model_scaling));
+    double pos_x = player.position.x + (((model_width * scaling) - model_width) / 2);
+    double pos_y = player.position.y + (((model_height * scaling) - model_height) / 2);
+    if (player.model_facing_right)
+    {
+        draw_bitmap(player.player_model, pos_x, pos_y, option_scale_bmp(player.model_scaling, player.model_scaling));
+    }
+    else
+    {
+        draw_bitmap(player.player_model, pos_x, pos_y, option_flip_y(option_scale_bmp(player.model_scaling, player.model_scaling)));
+    }
 
     const rectangle &hitbox = player.hitbox;
-    int hitbox_pos_x = coordinates_to_pixel(hitbox.x);
-    int hitbox_pos_y = coordinates_to_pixel(hitbox.y);
-    draw_rectangle(color_red(), hitbox_pos_x, hitbox_pos_y, hitbox.width, hitbox.height);
+
+    draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height); // TODO: hide hitbox
+}
+
+void move_player(player_data &player, double delta_time)
+{
+    double distance = player.speed * delta_time;
+
+    if (key_down(W_KEY))
+    {
+        player.position.y -= distance;
+    }
+    if (key_down(S_KEY))
+    {
+        player.position.y += distance;
+    }
+    if (key_down(A_KEY))
+    {
+        player.position.x -= distance;
+        player.model_facing_right = false;
+    }
+    if (key_down(D_KEY))
+    {
+        player.position.x += distance;
+        player.model_facing_right = true;
+    }
+}
+
+void control_player(player_data &player, int &last_updated_time)
+{
+    int current_time = current_ticks();
+    double delta_time = (current_time - last_updated_time) / 1000.0; // Convert to seconds
+
+    move_player(player, delta_time);
+
+    last_updated_time = current_time;
 }
 
 int main()
@@ -191,25 +239,25 @@ int main()
     room_data npc_room;
     player_data player;
 
+    int last_updated_time = 0;
+
     clear_screen(color_white());
 
     build_npc_room(npc_room);
-    draw_room(npc_room);
     load_player(player, npc_room);
-    draw_player(player);
-
-    // bitmap player_bitmap = load_bitmap("player_idle", "player_idle.png");
-
-    // draw_bitmap(player_bitmap, 50, 50, option_scale_bmp(4, 4)); // Use player_bitmap directly
-
-    refresh_screen();
 
     while (!quit_requested())
     {
+
+        draw_room(npc_room);
+        draw_player(player);
+
+        control_player(player, last_updated_time);
+
+        update_player_hitbox(player);
+        refresh_screen();
         process_events();
     }
 
     return 0;
 }
-
-// TODO: get rid of npc_room_data, make room struct the top in struct heirachy (maybbe add a room_properties struct in all rooms)
