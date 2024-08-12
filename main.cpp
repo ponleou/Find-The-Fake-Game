@@ -19,6 +19,7 @@ int get_screen_width()
     return (int)width;
 }
 
+// floor tile struct
 struct tile_data
 {
     color tile_color;
@@ -26,35 +27,45 @@ struct tile_data
     int size = get_tile_size();
 };
 
-struct flooring_data
-{
-    tile_data floor_array[ROOM_HEIGHT][ROOM_WIDTH];
-    // color color_pattern[2]; // TODO: if this is not needed to be used, remove it because its already it a functioin for each npc room
-    int size_y = ROOM_HEIGHT;
-    int size_x = ROOM_WIDTH;
-};
-
 struct coordinate
 {
     int x, y;
 };
 
-struct npc_room_data
+// struct for different rooms
+struct room_properties_data
 {
-    flooring_data floor;
-    int npc_array[MAX_NPC_PER_ROOM] = {}; // TODO: change the type to whatever the npcs are
-    int npc_size = 0;                     // TODO: remove the declaration for size and array
+    bool is_npc_room = false;
+    bool is_boss_room = false;
 };
 
+// flooring struct, using tiles as arrays
+struct room_data
+{
+    tile_data floor_array[ROOM_HEIGHT][ROOM_WIDTH];
+    // color color_pattern[2]; // TODO: if this is not needed to be used, remove it because its already it a functioin for each npc room
+    int size_y = ROOM_HEIGHT;
+    int size_x = ROOM_WIDTH;
+    coordinate spawn_coords = {ROOM_WIDTH / 2, ROOM_HEIGHT - 1};
+    room_properties_data properties;
+};
+
+// player info struct
 struct player_data
 {
     int health;
     rectangle hitbox;
-    bitmap player_idle = load_bitmap("player_idle", "./image_data/player_data/player_idle.png");
-    int size = get_tile_size();
+    bitmap player_model;
+    double model_scaling;
+    coordinate coords;
 };
 
-void build_npc_room(npc_room_data &room)
+int coordinates_to_pixel(int coord)
+{
+    return coord * get_tile_size();
+}
+
+void build_room(room_data &room)
 {
     color slate_grey = rgb_color(112, 128, 144);
     color light_slate_grey = rgb_color(132, 144, 153);
@@ -62,8 +73,8 @@ void build_npc_room(npc_room_data &room)
     // npc_room.floor.color_pattern[0] = softBlue;
     // npc_room.floor.color_pattern[1] = paleYellow; //TODO: remove if not needed
 
-    int size_y = room.floor.size_y;
-    int size_x = room.floor.size_x;
+    int size_y = room.size_y;
+    int size_x = room.size_x;
 
     for (int y = 0; y < size_y; y++)
     {
@@ -78,19 +89,25 @@ void build_npc_room(npc_room_data &room)
             }
 
             if (x % 2 == 0)
-                room.floor.floor_array[y][x].tile_color = first_color;
+                room.floor_array[y][x].tile_color = first_color;
             else
-                room.floor.floor_array[y][x].tile_color = second_color;
+                room.floor_array[y][x].tile_color = second_color;
         }
     }
 }
 
-void draw_tile(const flooring_data &floor, const coordinate &coord)
+void build_npc_room(room_data &room)
+{
+    build_room(room);
+    room.properties.is_npc_room = true;
+}
+
+void draw_tile(const room_data &room, const coordinate &coord)
 {
     int x = coord.x;
     int y = coord.y;
 
-    const tile_data &tile = floor.floor_array[y][x];
+    const tile_data &tile = room.floor_array[y][x];
     color tile_color = tile.tile_color;
     int pos_x = get_tile_size() * x;
     int pos_y = get_tile_size() * y;
@@ -98,37 +115,65 @@ void draw_tile(const flooring_data &floor, const coordinate &coord)
     fill_rectangle(tile_color, pos_x, pos_y, size, size);
 }
 
-void draw_floor(const flooring_data &floor)
+void draw_floor(const room_data &room)
 {
-    for (int y = 0; y < floor.size_y; y++)
+    for (int y = 0; y < room.size_y; y++)
     {
-        for (int x = 0; x < floor.size_x; x++)
+        for (int x = 0; x < room.size_x; x++)
         {
             coordinate tile_coorindate = {x, y};
-            draw_tile(floor, tile_coorindate);
+            draw_tile(room, tile_coorindate);
         }
     }
 }
 
-void draw_npc_room(const npc_room_data &room)
+// TODO: access properties to draw different things for rooms with different properties (wull probablt)
+void draw_room(const room_data &room)
 {
-    draw_floor(room.floor);
+    draw_floor(room);
+}
+
+void load_player(player_data &player, const room_data &room)
+{
+    player.player_model = load_bitmap("player_idle", "./image_data/player_data/player_idle.png");
+    player.health = 10; // TODO: change
+
+    double model_width = bitmap_width(player.player_model);
+    double model_height = bitmap_height(player.player_model);
+
+    if (model_width < model_height)
+    {
+        player.model_scaling = (double)get_tile_size() / model_width;
+    }
+
+    if (model_height < model_width)
+    {
+        player.model_scaling = (double)get_tile_size() / model_height;
+    }
+
+    player.coords = room.spawn_coords;
 }
 
 void draw_player(const player_data &player)
 {
+    int pos_x = coordinates_to_pixel(player.coords.x);
+    int pos_y = coordinates_to_pixel(player.coords.y);
+    draw_bitmap(player.player_model, pos_x, pos_y, option_scale_bmp(player.model_scaling, player.model_scaling));
 }
 
 int main()
 {
     open_window("YOU.exe", get_screen_width(), SCREEN_RESOLUTION);
 
-    npc_room_data npc_room;
+    room_data npc_room;
+    player_data player;
 
     clear_screen(color_white());
 
     build_npc_room(npc_room);
-    draw_npc_room(npc_room);
+    draw_room(npc_room);
+    load_player(player, npc_room);
+    draw_player(player);
 
     // bitmap player_bitmap = load_bitmap("player_idle", "player_idle.png");
 
@@ -143,3 +188,5 @@ int main()
 
     return 0;
 }
+
+// TODO: get rid of npc_room_data, make room struct the top in struct heirachy (maybbe add a room_properties struct in all rooms)
