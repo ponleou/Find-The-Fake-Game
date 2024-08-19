@@ -21,6 +21,14 @@ int get_screen_width()
     return (int)width;
 }
 
+struct game_timing_data
+{
+    int current_time = current_ticks();
+    double delta_time;
+    int last_update_time = 0;
+    double time_rate = 1; // how many seconds the game should load in one second
+};
+
 // TODO: for the zoom camera: tile_data must have its own position, position set when creating floor array
 // floor tile struct
 struct tile_data
@@ -398,36 +406,40 @@ void player_attack(player_data &player)
     }
 }
 
-// function to control character
-void control_player(player_data &player, double delta_time)
+void slow_time(double &time_rate)
 {
-    move_player(player, delta_time);
-    player_attack_timer(player, delta_time);
+    if (key_down(LEFT_SHIFT_KEY) || mouse_down(RIGHT_BUTTON))
+        time_rate = 0.5;
+    else
+        time_rate = 1;
+}
+
+// function to control character
+void control_player(player_data &player, game_timing_data &game_timing)
+{
+    move_player(player, game_timing.delta_time);
+    player_attack_timer(player, game_timing.delta_time);
     player_attack(player);
+    slow_time(game_timing.time_rate);
 }
 
 int main()
 {
     open_window("Find The Imposter.exe", get_screen_width(), SCREEN_RESOLUTION);
 
+    game_timing_data game_timing;
     room_data room;
     player_data player;
-
-    int current_time, last_updated_time;
-    double delta_time;
-
-    last_updated_time = 0;
 
     build_room(room);
     load_player(player, room);
 
     while (!quit_requested())
     {
-        current_time = current_ticks();
-
-        delta_time = ((double)current_time - (double)last_updated_time); // ms
-
-        last_updated_time = current_time;
+        // setting game timing
+        game_timing.current_time = current_ticks();
+        game_timing.delta_time = ((double)game_timing.current_time - (double)game_timing.last_update_time) * game_timing.time_rate; // ms
+        game_timing.last_update_time = game_timing.current_time;
 
         clear_screen(color_white());
 
@@ -440,7 +452,7 @@ int main()
 
         update_sword_position(player);
 
-        control_player(player, delta_time);
+        control_player(player, game_timing);
 
         update_player_box(player);
         refresh_screen();
