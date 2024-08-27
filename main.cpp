@@ -1,4 +1,5 @@
 #include "splashkit.h"
+#include <iostream>
 
 const int SCREEN_RESOLUTION = 1080;
 
@@ -6,10 +7,16 @@ const int ROOM_WIDTH = 40;  // aka the column
 const int ROOM_HEIGHT = 30; // aka the row
 // the ratio of the room is 4:3
 
+// TODO:
+// member functions
+// forward declaration of structs inside structs
+
 double zoom_level = 1;
 // TODO: focused zoom feature
 //  if get_tile_size function returns a larger value, everything zooms in
 //  a tracking camera can be implemented by calculated the coordinate of the top left that would keep the character in the middle
+
+// size of each tile of the room, also the value that everything in the same is scaled by
 int get_tile_size()
 {
     return SCREEN_RESOLUTION / ROOM_HEIGHT * zoom_level;
@@ -21,12 +28,65 @@ int get_screen_width()
     return (int)width;
 }
 
-struct game_timing_data
+struct coordinate
 {
-    int current_time = current_ticks();
+    double x, y;
+
+    coordinate()
+    {
+        x = 0;
+        y = 0;
+    }
+
+    coordinate(double x, double y)
+    {
+        this->x = x;
+        this->y = y;
+    }
+
+    coordinate tile_to_pixel()
+    {
+        return {x * get_tile_size(), y * get_tile_size()};
+    }
+};
+
+class game_timing_data
+{
+private:
+    double current_time;
     double delta_time;
-    int last_update_time = 0;
-    double time_rate = 1; // how many seconds the game should load in one second
+    double last_update_time;
+    double time_rate; // how many seconds the game should load in one second
+
+public:
+    game_timing_data()
+    {
+        current_time = current_ticks();
+        last_update_time = 0;
+        time_rate = 1;
+    }
+
+    int get_current_time()
+    {
+        return current_ticks();
+    }
+
+    // must be ran inside a game loop
+    void update_timing()
+    {
+        delta_time = (get_current_time() - last_update_time) / time_rate;
+        last_update_time = get_current_time();
+    }
+
+    int get_delta_time()
+    {
+        return delta_time;
+    }
+
+    void set_time_rate(double rate)
+    {
+        time_rate = rate;
+    }
 };
 
 // TODO: for the zoom camera: tile_data must have its own position, position set when creating floor array
@@ -38,19 +98,92 @@ struct tile_data
     int size = get_tile_size();
 };
 
-struct coordinate
-{
-    double x, y;
-};
-
 // flooring struct, using tiles as arrays
-struct room_data
+class room_data
 {
+private:
     tile_data floor_array[ROOM_HEIGHT][ROOM_WIDTH];
     color color_pattern[3]; // 0 and 1 is the floor checkers color pattern, 2 is the walls
     int size_y = ROOM_HEIGHT;
     int size_x = ROOM_WIDTH;
-    coordinate spawn_coords = {(ROOM_WIDTH - 1) / 2, (ROOM_HEIGHT - 1) - 2}; // -2 because one for the wall, one for the leg (player coord is at the head)
+    coordinate spawn_coords;
+
+    void construct_room(color floor_color_1, color floor_color_2, color wall_color, coordinate spawn_coords)
+    {
+        // setting room color
+        color_pattern[0] = floor_color_1;
+        color_pattern[1] = floor_color_2;
+        color_pattern[2] = wall_color;
+
+        this->spawn_coords = spawn_coords;
+
+        for (int y = 0; y < size_y; y++)
+        {
+            for (int x = 0; x < size_x; x++)
+            {
+
+                // making the walls of the room, they cannot be passed
+                if (x == 0 || x == size_x - 1 || y == 0 || y == size_y - 1)
+                {
+                    floor_array[y][x].tile_color = color_pattern[2];
+                    floor_array[y][x].passable = false;
+                    continue;
+                }
+
+                // making the floor as a checked pattern
+                color first_color = color_pattern[0];
+                color second_color = color_pattern[1];
+                if (y % 2 != 0)
+                {
+                    first_color = color_pattern[1];
+                    second_color = color_pattern[0];
+                }
+
+                if (x % 2 == 0)
+                    floor_array[y][x].tile_color = first_color;
+                else
+                    floor_array[y][x].tile_color = second_color;
+            }
+        }
+    }
+
+public:
+    // FIXME: each tile should also record its pixel coordinate // FIXME: wait why?
+    // Constructor
+    room_data(coordinate spawn_coords)
+    {
+        // setting room color
+        color slate_grey = rgb_color(112, 128, 144);
+        color light_slate_grey = rgb_color(132, 144, 153);
+        color light_steel_blue = rgb_color(150, 170, 200);
+
+        construct_room(slate_grey, light_slate_grey, light_steel_blue, spawn_coords);
+    }
+
+    room_data(color floor_color_1, color floor_color_2, color wall_color, coordinate spawn_coords)
+    {
+        construct_room(floor_color_1, floor_color_2, wall_color, spawn_coords);
+    }
+
+    void draw()
+    {
+        for (int y = 0; y < size_y; y++)
+        {
+            for (int x = 0; x < size_x; x++)
+            {
+                color tile_color = floor_array[y][x].tile_color;
+                coordinate tile_coords = {(double)x, (double)y};
+                coordinate coords = tile_coords.tile_to_pixel();
+                int size = floor_array[y][x].size;
+                fill_rectangle(tile_color, coords.x, coords.y, size, size);
+            }
+        }
+    }
+
+    coordinate get_spawn_coords()
+    {
+        return spawn_coords;
+    }
 };
 
 enum sword_phase
@@ -59,26 +192,23 @@ enum sword_phase
     SWORD_SWING,
 };
 
-// TODO: change code to use sword data inside the player
 // sword info stuct
 struct sword_data
 {
-    bitmap sword_model_1;
-    bitmap sword_model_2;
+    bitmap sword_draw_model;
+    bitmap sword_swing_model;
     double model_scaling;
     coordinate position;
     sword_phase phase;
 };
 
+// TODO: move all the default values to the constructor
 // player info struct
-struct player_data
+class player_data
 {
+private:
     int health;
     double speed; // pixels per second
-
-    int attack_speed;            // ms
-    double last_attack_time = 0; // used for attack cooldowns
-    bool is_attacking = false;
 
     coordinate position;
     rectangle hurtbox;
@@ -86,341 +216,357 @@ struct player_data
     bool model_facing_right = true;
     double model_scaling;
 
+    int attack_speed; // ms
+    bool is_attacking = false;
     bool create_hitbox = false;
     rectangle hitbox;
+    int hitbox_lasting_time = 100; // ms
     sword_data sword;
-};
 
-// coordinates are from the flooring and tiles, change floor tiling coordinates to pixel/screen coorindates
-// TODO: add this function into the room_data struct itself (its the only place that uses it) or maybe keep coordinates system
-double coordinates_tiles_to_pixel(double coord)
-{
-    return coord * get_tile_size();
-}
+    double attack_cooldown;
+    bool can_attack;
 
-// FIXME: each tile should also record its pixel coordinate // FIXME: wait why?
-// setting values for members in room_data struct
-void build_room(room_data &room)
-{
-    // setting room color
-    color slate_grey = rgb_color(112, 128, 144);
-    color light_slate_grey = rgb_color(132, 144, 153);
-    color light_steel_blue = rgb_color(150, 170, 200);
-
-    room.color_pattern[0] = slate_grey;
-    room.color_pattern[1] = light_slate_grey;
-    room.color_pattern[2] = light_steel_blue;
-
-    // setting tile properties inside the floor array
-    int size_y = room.size_y;
-    int size_x = room.size_x;
-
-    for (int y = 0; y < size_y; y++)
+    void attacking()
     {
-        for (int x = 0; x < size_x; x++)
+        if (attack_cooldown < attack_speed)
         {
-
-            // making the walls of the room, they cannot be passed
-            if (x == 0 || x == size_x - 1 || y == 0 || y == size_y - 1)
-            {
-                room.floor_array[y][x].tile_color = room.color_pattern[2];
-                room.floor_array[y][x].passable = false;
-                continue;
-            }
-
-            // making the floor as a checked pattern
-            color first_color = room.color_pattern[0];
-            color second_color = room.color_pattern[1];
-            if (y % 2 != 0)
-            {
-                first_color = room.color_pattern[1];
-                second_color = room.color_pattern[0];
-            }
-
-            if (x % 2 == 0)
-                room.floor_array[y][x].tile_color = first_color;
+            sword.phase = SWORD_DRAW;
+            draw_sword();
+        }
+        else if (attack_cooldown < attack_speed * 1.5)
+        {
+            sword.phase = SWORD_SWING;
+            if (attack_cooldown < attack_speed + hitbox_lasting_time)
+                create_hitbox = true;
             else
-                room.floor_array[y][x].tile_color = second_color;
+                create_hitbox = false;
+            draw_sword();
         }
     }
-}
 
-// draw each tile of the floor on different coordinates as specified
-void draw_tile(const tile_data &tile, const coordinate &coord)
-{
-    double x = coord.x;
-    double y = coord.y;
-
-    color tile_color = tile.tile_color;
-    int pos_x = get_tile_size() * x;
-    int pos_y = get_tile_size() * y;
-    int size = tile.size;
-    fill_rectangle(tile_color, pos_x, pos_y, size, size);
-}
-
-// draw the room by calling the draw_tile function
-void draw_room(const room_data &room)
-{
-    for (int y = 0; y < room.size_y; y++)
+    void construct_player(double model_size, coordinate spawn_coords)
     {
-        for (int x = 0; x < room.size_x; x++)
+        // setting player
+        player_model = load_bitmap("player_idle", "./image_data/player/player_idle.png");
+
+        // default values or stats
+        health = 10;                     // FIXME: change
+        speed = 5.0 * model_size / 1000; // pixels per milisecond
+        attack_speed = 1000;             // ms
+
+        can_attack = true;
+        attack_cooldown = 0;
+
+        double model_width = bitmap_width(player_model);
+        double model_height = bitmap_height(player_model);
+
+        if (model_width < model_height)
         {
-            coordinate tile_coorindate = {(double)x, (double)y};
-            draw_tile(room.floor_array[y][x], tile_coorindate);
+            model_scaling = model_size / model_width;
+        }
+
+        if (model_height < model_width)
+        {
+            model_scaling = model_size / model_height;
+        }
+
+        position = coordinate(spawn_coords.x, spawn_coords.y).tile_to_pixel();
+        update_box();
+
+        // setting sword struct
+        sword.sword_draw_model = load_bitmap("Sword draw", "./image_data/sword/sword_1.png");
+        sword.sword_swing_model = load_bitmap("Sword attack", "./image_data/sword/sword_2.png");
+
+        // both sword bitmap have the same size
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+        double sword_model_height = bitmap_height(sword.sword_draw_model);
+
+        // flip when facing opposite direction
+        if (sword_model_width < sword_model_height)
+        {
+            sword.model_scaling = model_size / sword_model_width;
+        }
+
+        if (sword_model_height < sword_model_width)
+        {
+            sword.model_scaling = model_size / sword_model_height;
+        }
+
+        update_sword();
+    }
+
+public:
+    // Constructor
+    player_data(double model_size)
+    {
+        construct_player(model_size, coordinate(0, 0));
+    }
+
+    player_data(double model_size, coordinate spawn_coords)
+    {
+        construct_player(model_size, spawn_coords);
+    }
+
+    // getters and setters
+    double get_speed()
+    {
+        return speed;
+    }
+
+    void set_speed(double speed)
+    {
+        this->speed = speed;
+    }
+
+    int get_health()
+    {
+        return health;
+    }
+
+    void set_health(int health)
+    {
+        this->health = health;
+    }
+
+    int get_attack_speed()
+    {
+        return attack_speed;
+    }
+
+    void set_attack_speed(int attack_speed)
+    {
+        this->attack_speed = attack_speed;
+    }
+
+    coordinate get_position()
+    {
+        return position;
+    }
+
+    void set_position(coordinate position)
+    {
+        this->position = position;
+    }
+
+    void set_is_facing_right(bool facing_right)
+    {
+        model_facing_right = facing_right;
+    }
+
+    void attack()
+    {
+        if (can_attack)
+        {
+            is_attacking = true;
         }
     }
-}
 
-// update the position of the player's hurtbox and hitbox
-void update_player_box(player_data &player)
-{
-    // player hurtbox
-    double player_model_width = bitmap_width(player.player_model);
-    double player_model_height = bitmap_height(player.player_model);
-    player.hurtbox = {player.position.x, player.position.y, player_model_width * player.model_scaling, player_model_height * player.model_scaling};
-
-    // player hitbox
-    double sword_model_width = bitmap_width(player.sword.sword_model_1);
-    double sword_model_height = bitmap_height(player.sword.sword_model_1);
-    double hitbox_size_x, hitbox_size_y;
-
-    // player hitbox is 0 if there isnt an attack happening (which is when create_hitbox is false)
-    if (player.create_hitbox)
+    // update the hurtbox to align with the player's position
+    void update_hurtbox()
     {
-        hitbox_size_x = sword_model_width * player.sword.model_scaling;
-        hitbox_size_y = sword_model_height * player.sword.model_scaling * 2;
-    }
-    else
-    {
-        hitbox_size_x = 0;
-        hitbox_size_y = 0;
+        double player_model_width = bitmap_width(player_model);
+        double player_model_height = bitmap_height(player_model);
+        hurtbox = {position.x, position.y, player_model_width * model_scaling, player_model_height * model_scaling};
     }
 
-    if (player.model_facing_right)
-        player.hitbox = {player.position.x + (player_model_width * player.model_scaling), player.position.y, hitbox_size_x, hitbox_size_y};
-    else
-        player.hitbox = {player.position.x - hitbox_size_x, player.position.y, hitbox_size_x, hitbox_size_y};
-}
-
-// function to update the sword position to align with the player
-void update_sword_position(player_data &player)
-{
-    sword_data &sword = player.sword;
-
-    double player_model_width = bitmap_width(player.player_model);
-    double player_model_height = bitmap_height(player.player_model);
-
-    double sword_model_width = bitmap_width(sword.sword_model_1);
-
-    // making the sword align with the player
-    if (player.model_facing_right)
+    // update the hitbox to align with the player's position
+    void update_hitbox()
     {
-        sword.position.x = player.position.x + (player_model_width * player.model_scaling);
-        sword.position.y = player.position.y + (player_model_height / 2 * player.model_scaling);
-    }
-    else
-    {
-        sword.position.x = player.position.x - (sword_model_width * sword.model_scaling);
-        sword.position.y = player.position.y + (player_model_height / 2 * player.model_scaling);
-    }
-}
+        double player_model_width = bitmap_width(player_model);
 
-// load values into members of sword_data struct
-void load_sword(player_data &player)
-{
-    sword_data &sword = player.sword;
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+        double sword_model_height = bitmap_height(sword.sword_draw_model);
+        double hitbox_size_x, hitbox_size_y;
 
-    sword.sword_model_1 = load_bitmap("Sword draw", "./image_data/sword/sword_1.png");
-    sword.sword_model_2 = load_bitmap("Sword attack", "./image_data/sword/sword_2.png");
+        // player hitbox is 0 if there isnt an attack happening (which is when create_hitbox is false)
+        if (create_hitbox)
+        {
+            hitbox_size_x = sword_model_width * sword.model_scaling;
+            hitbox_size_y = sword_model_height * sword.model_scaling * 2;
+        }
+        else
+        {
+            hitbox_size_x = 0;
+            hitbox_size_y = 0;
+        }
 
-    // both sword bitmap have the same size
-    double sword_model_width = bitmap_width(sword.sword_model_1);
-    double sword_model_height = bitmap_height(sword.sword_model_1);
-
-    // flip when facing opposite direction
-    if (sword_model_width < sword_model_height)
-    {
-        sword.model_scaling = (double)get_tile_size() / sword_model_width;
+        if (model_facing_right)
+            hitbox = {position.x + (player_model_width * model_scaling), position.y, hitbox_size_x, hitbox_size_y};
+        else
+            hitbox = {position.x - hitbox_size_x, position.y, hitbox_size_x, hitbox_size_y};
     }
 
-    if (sword_model_height < sword_model_width)
+    void update_box()
     {
-        sword.model_scaling = (double)get_tile_size() / sword_model_height;
+        update_hitbox();
+        update_hurtbox();
     }
 
-    update_sword_position(player);
-}
-
-// load values into the player_data struct
-void load_player(player_data &player, const room_data &room)
-{
-    player.player_model = load_bitmap("player_idle", "./image_data/player/player_idle.png");
-    player.health = 10;                                  // FIXME: change
-    player.speed = 5.0 * (double)get_tile_size() / 1000; // pixels per milisecond
-    player.attack_speed = 1000;                          // ms
-
-    double model_width = bitmap_width(player.player_model);
-    double model_height = bitmap_height(player.player_model);
-
-    if (model_width < model_height)
+    // update the sword's position to align with the player's position
+    void update_sword()
     {
-        player.model_scaling = (double)get_tile_size() / model_width;
+        double player_model_width = bitmap_width(player_model);
+        double player_model_height = bitmap_height(player_model);
+
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+
+        // making the sword align with the player
+        if (model_facing_right)
+        {
+            sword.position.x = position.x + (player_model_width * model_scaling);
+            sword.position.y = position.y + (player_model_height / 2 * model_scaling);
+        }
+        else
+        {
+            sword.position.x = position.x - (sword_model_width * sword.model_scaling);
+            sword.position.y = position.y + (player_model_height / 2 * model_scaling);
+        }
     }
 
-    if (model_height < model_width)
+    // must be ran inside game loop
+    void update_attack_cooldown(double delta_time)
     {
-        player.model_scaling = (double)get_tile_size() / model_height;
+        attack_cooldown += delta_time; // FIXME: attack_cooldown wont accumulate
+
+        if (attack_cooldown >= attack_speed * 2)
+        {
+            can_attack = true;
+            is_attacking = false;
+            attack_cooldown = 0;
+        }
+        else
+            can_attack = false;
     }
 
-    player.position = {coordinates_tiles_to_pixel(room.spawn_coords.x), coordinates_tiles_to_pixel(room.spawn_coords.y)};
-    update_player_box(player);
-    load_sword(player);
-}
-
-// draw player onto the screen
-void draw_player(const player_data &player)
-{
-    double model_width = bitmap_width(player.player_model);
-    double model_height = bitmap_height(player.player_model);
-    double scaling = player.model_scaling;
-
-    // fixing bitmap scaling position
-    double pos_x = player.position.x + (((model_width * scaling) - model_width) / 2);
-    double pos_y = player.position.y + (((model_height * scaling) - model_height) / 2);
-
-    // flip when facing opposite direction
-    if (player.model_facing_right)
+    void update(game_timing_data &game)
     {
-        draw_bitmap(player.player_model, pos_x, pos_y, option_scale_bmp(player.model_scaling, player.model_scaling));
-    }
-    else
-    {
-        draw_bitmap(player.player_model, pos_x, pos_y, option_flip_y(option_scale_bmp(player.model_scaling, player.model_scaling)));
+        update_box();
+        update_sword();
+
+        if (is_attacking)
+        {
+            update_attack_cooldown(game.get_delta_time());
+            attacking();
+        }
+
+        // printf("attack cooldown: %d, delta time %d \n", attack_cooldown, game.get_delta_time());
     }
 
-    const rectangle &hurtbox = player.hurtbox;
-    const rectangle &hitbox = player.hitbox;
-
-    draw_rectangle(color_red(), hurtbox.x, hurtbox.y, hurtbox.width, hurtbox.height); // FIXME: hide hurtbox
-    draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height);     // FIXME: hide hitbox
-}
-
-// draw sword onto the screen
-void draw_sword(const player_data &player)
-{
-    const sword_data &sword = player.sword;
-
-    double sword_model_width = bitmap_width(sword.sword_model_1);
-    double sword_model_height = bitmap_height(sword.sword_model_1);
-    double scaling = sword.model_scaling;
-
-    double player_model_height = bitmap_height(player.player_model);
-
-    // fixing bitmap scaling position
-    double pos_x = sword.position.x + (((sword_model_width * scaling) - sword_model_width) / 2);
-    double pos_y = sword.position.y + (((sword_model_height * scaling) - sword_model_height) / 2);
-
-    sword_phase model = sword.phase;
-
-    if (player.model_facing_right)
+    double get_attack_cool_down()
     {
-        if (model == SWORD_DRAW)
-            draw_bitmap(sword.sword_model_1, pos_x, pos_y, option_scale_bmp(scaling, scaling));
-        if (model == SWORD_SWING)
-            draw_bitmap(sword.sword_model_2, pos_x, pos_y - (player_model_height / 2 * player.model_scaling), option_scale_bmp(scaling, scaling));
+        return attack_cooldown;
     }
-    else
+
+    // draw player onto screen
+    void draw_player()
     {
-        if (model == SWORD_DRAW)
-            draw_bitmap(sword.sword_model_1, pos_x, pos_y, option_flip_y(option_scale_bmp(scaling, scaling)));
-        if (model == SWORD_SWING)
-            draw_bitmap(sword.sword_model_2, pos_x, pos_y - (player_model_height / 2 * player.model_scaling), option_flip_y(option_scale_bmp(scaling, scaling)));
+        double model_width = bitmap_width(player_model);
+        double model_height = bitmap_height(player_model);
+        double scaling = model_scaling;
+
+        // fixing bitmap scaling position
+        double pos_x = position.x + (((model_width * scaling) - model_width) / 2);
+        double pos_y = position.y + (((model_height * scaling) - model_height) / 2);
+
+        // flip when facing opposite direction
+        if (model_facing_right)
+        {
+            draw_bitmap(player_model, pos_x, pos_y, option_scale_bmp(model_scaling, model_scaling));
+        }
+        else
+        {
+            draw_bitmap(player_model, pos_x, pos_y, option_flip_y(option_scale_bmp(model_scaling, model_scaling)));
+        }
+
+        draw_rectangle(color_red(), hurtbox.x, hurtbox.y, hurtbox.width, hurtbox.height); // FIXME: hide hurtbox
+        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height);     // FIXME: hide hitbox
     }
-}
+
+    // draw player's sword onto screen
+    void draw_sword()
+    {
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+        double sword_model_height = bitmap_height(sword.sword_draw_model);
+        double scaling = sword.model_scaling;
+
+        double player_model_height = bitmap_height(player_model);
+
+        // fixing bitmap scaling position
+        double pos_x = sword.position.x + (((sword_model_width * scaling) - sword_model_width) / 2);
+        double pos_y = sword.position.y + (((sword_model_height * scaling) - sword_model_height) / 2);
+
+        sword_phase model = sword.phase;
+
+        if (model_facing_right)
+        {
+            if (model == SWORD_DRAW)
+                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_scale_bmp(scaling, scaling));
+            if (model == SWORD_SWING)
+                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / 2 * model_scaling), option_scale_bmp(scaling, scaling));
+        }
+        else
+        {
+            if (model == SWORD_DRAW)
+                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_flip_y(option_scale_bmp(scaling, scaling)));
+            if (model == SWORD_SWING)
+                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / 2 * model_scaling), option_flip_y(option_scale_bmp(scaling, scaling)));
+        }
+    }
+};
 
 // function to calculate and change position of player
 void move_player(player_data &player, double delta_time)
 {
     // calculating distance using delta_time to avoid game lag issues
-    double distance = player.speed * delta_time;
+    double distance = player.get_speed() * delta_time;
 
     if (key_down(W_KEY))
     {
-        player.position.y -= distance;
+        coordinate new_position(player.get_position().x, player.get_position().y - distance);
+        player.set_position(new_position);
     }
     if (key_down(S_KEY))
     {
-        player.position.y += distance;
+        coordinate new_position(player.get_position().x, player.get_position().y + distance);
+        player.set_position(new_position);
     }
     if (key_down(A_KEY))
     {
-        player.position.x -= distance;
-        player.model_facing_right = false;
+        coordinate new_position(player.get_position().x - distance, player.get_position().y);
+        player.set_position(new_position);
+        player.set_is_facing_right(false);
     }
     if (key_down(D_KEY))
     {
-        player.position.x += distance;
-        player.model_facing_right = true;
+        coordinate new_position(player.get_position().x + distance, player.get_position().y);
+        player.set_position(new_position);
+        player.set_is_facing_right(true);
     }
 }
 
 // controls timing and cooldown of player attack, sets player.is_attacking to true
-void player_attack_timer(player_data &player, double delta_time)
-{
-    player.last_attack_time += delta_time;
-
-    if (player.last_attack_time >= player.attack_speed * 2)
-    {
-        if (key_down(SPACE_KEY) || mouse_clicked(LEFT_BUTTON))
-        {
-            player.is_attacking = true;
-            player.last_attack_time = 0;
-        }
-    }
-}
-
-// plays player attack animation and create hitbox when player.is_attacking is true
 void player_attack(player_data &player)
 {
-    sword_data &sword = player.sword;
-
-    if (!player.is_attacking)
-        return;
-
-    int hitbox_lasting_time = 100; // ms
-
-    if (player.last_attack_time < player.attack_speed)
+    if ((key_down(SPACE_KEY) || mouse_clicked(LEFT_BUTTON)))
     {
-        sword.phase = SWORD_DRAW;
-        draw_sword(player);
-    }
-    else if (player.last_attack_time < player.attack_speed * 1.5)
-    {
-        sword.phase = SWORD_SWING;
-        draw_sword(player);
-
-        if (player.last_attack_time < player.attack_speed + hitbox_lasting_time)
-            player.create_hitbox = true;
-        else
-            player.create_hitbox = false;
+        player.attack();
     }
 }
 
-void slow_time(double &time_rate)
+void slow_time(game_timing_data &game_timing)
 {
     if (key_down(LEFT_SHIFT_KEY) || mouse_down(RIGHT_BUTTON))
-        time_rate = 0.5;
+        game_timing.set_time_rate(0.5);
     else
-        time_rate = 1;
+        game_timing.set_time_rate(1);
 }
 
 // function to control character
 void control_player(player_data &player, game_timing_data &game_timing)
 {
-    move_player(player, game_timing.delta_time);
-    player_attack_timer(player, game_timing.delta_time);
+    move_player(player, game_timing.get_delta_time());
     player_attack(player);
-    slow_time(game_timing.time_rate);
+    slow_time(game_timing);
 }
 
 int main()
@@ -428,18 +574,13 @@ int main()
     open_window("Find The Imposter.exe", get_screen_width(), SCREEN_RESOLUTION);
 
     game_timing_data game_timing;
-    room_data room;
-    player_data player;
-
-    build_room(room);
-    load_player(player, room);
+    room_data room(coordinate((ROOM_WIDTH - 1) / 2, (ROOM_HEIGHT - 1) - 2)); // -2 because one for the wall, one for the leg (player coord is at the head));
+    player_data player(get_tile_size(), room.get_spawn_coords());
 
     while (!quit_requested())
     {
         // setting game timing
-        game_timing.current_time = current_ticks();
-        game_timing.delta_time = ((double)game_timing.current_time - (double)game_timing.last_update_time) * game_timing.time_rate; // ms
-        game_timing.last_update_time = game_timing.current_time;
+        game_timing.update_timing();
 
         clear_screen(color_white());
 
@@ -447,14 +588,14 @@ int main()
         // point_2d pt = {-50, 500};
         // set_camera_position(pt);
 
-        draw_room(room);
-        draw_player(player);
-
-        update_sword_position(player);
+        room.draw();
+        player.draw_player();
+        player.update(game_timing);
 
         control_player(player, game_timing);
 
-        update_player_box(player);
+        write_line(std::to_string(player.get_attack_cool_down()));
+
         refresh_screen();
         process_events();
     }
