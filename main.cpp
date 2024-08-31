@@ -26,49 +26,67 @@ int get_screen_width()
     return (int)width;
 }
 
+// data type for coorindates, can be used for both pixel and tile coordinates
+// tile coordinates are the coordinates of the tiles in the room (room_data)
 struct coordinate
 {
     double x, y;
 
+    // to convert tile coorindates to pixel coordinates
     coordinate tile_to_pixel()
     {
         return {x * get_tile_size(), y * get_tile_size()};
     }
+
+    // generate random coordinates
+    coordinate random_coordinate(coordinate max_coords)
+    {
+        return {(double)rnd(max_coords.x), (double)rnd(max_coords.y)};
+    }
+
+    coordinate random_coordinate(coordinate min_coords, coordinate max_coords)
+    {
+        return {(double)rnd(min_coords.x, max_coords.x), (double)rnd(min_coords.y, max_coords.y)};
+    }
 };
 
+// class to hold the timing data of the game (mostly for the delta time)
 class game_timing_data
 {
 private:
-    double current_time;
     double delta_time;
     double last_update_time;
     double time_rate; // how many seconds the game should load in one second
 
-public:
-    game_timing_data()
-    {
-        current_time = current_ticks();
-        last_update_time = 0;
-        time_rate = 1;
-    }
-
+    // get the current time
     int get_current_time()
     {
         return current_ticks();
     }
 
-    // must be ran inside a game loop
+public:
+    // Constructor
+    game_timing_data()
+    {
+        last_update_time = 0;
+        time_rate = 1;
+    }
+
+    // must be ran inside a game loop in order to update the delta time
     void update_timing()
     {
-        delta_time = (get_current_time() - last_update_time) / time_rate;
+        delta_time = (get_current_time() - last_update_time) * time_rate;
         last_update_time = get_current_time();
     }
+
+    // setters and getters
 
     int get_delta_time()
     {
         return delta_time;
     }
 
+    // set time rate, changes the time rate of the delta time
     void set_time_rate(double rate)
     {
         time_rate = rate;
@@ -102,6 +120,7 @@ private:
         color_pattern[1] = floor_color_2;
         color_pattern[2] = wall_color;
 
+        // setting spawn coordinates, it is passed as a tile coordinate
         this->spawn_coords = spawn_tile.tile_to_pixel();
 
         for (int y = 0; y < size_y; y++)
@@ -152,6 +171,7 @@ public:
         construct_room(floor_color_1, floor_color_2, wall_color, spawn_coords);
     }
 
+    // draw the room onto the screen
     void draw()
     {
         for (int y = 0; y < size_y; y++)
@@ -167,6 +187,7 @@ public:
         }
     }
 
+    // getters
     coordinate get_spawn_coords()
     {
         return spawn_coords;
@@ -179,10 +200,10 @@ private:
     int health;
     double speed; // pixels per second
 
-    rectangle hurtbox;
+    rectangle hurtbox; // the box that determines the player's collision
     bitmap character_model;
-    bool model_facing_right; // default true
-    double model_scaling;
+    bool model_facing_right; // models are drawn facing right, this is used to determine if the model should be flipped
+    double model_scaling;    // scaling of the model, character model is scaled by this value (character model is made at 5x10 pixels)
 
 protected:
     coordinate position;
@@ -190,18 +211,15 @@ protected:
     character_data(int health, double speed, bitmap model, bool model_facing_right, double model_size, coordinate spawn_coords)
     {
         // setting player
-        // character_model = load_bitmap("player_idle", "./image_data/player/player_idle.png"); // FIXME: make a new model
         character_model = model;
-        this->model_facing_right = model_facing_right;
-
-        // default values or stats
+        this->model_facing_right = model_facing_right; // depending on the drawn model, the player might be facing right or left
         this->health = health;
         this->speed = speed; // pixels per milisecond
-        // speed = 5.0 * model_size / 1000; // pixels per milisecond
 
         double model_width = bitmap_width(character_model);
         double model_height = bitmap_height(character_model);
 
+        // determining the scaling of the model, the smallest side will be scaled to the model_size
         if (model_width < model_height)
         {
             model_scaling = model_size / model_width;
@@ -215,6 +233,7 @@ protected:
         update_hurtbox();
     }
 
+    // update the position of the hurtbox as the character moves (align with character's position)
     void update_hurtbox()
     {
         double model_width = bitmap_width(character_model);
@@ -222,11 +241,13 @@ protected:
         hurtbox = {position.x, position.y, model_width * model_scaling, model_height * model_scaling};
     }
 
+    // return the model (bitmap) of the character
     bitmap get_model()
     {
         return character_model;
     }
 
+    // get the direction the character is facing (direction of the model)
     bool get_is_facing_right()
     {
         return model_facing_right;
@@ -243,6 +264,41 @@ protected:
     }
 
 public:
+    // move the character in a direction by a distance
+    void move(vector_2d direction, double distance)
+    {
+        if (direction.x != 0 || direction.y != 0)
+        {
+            direction = unit_vector(direction);
+        }
+        vector_2d movement = vector_multiply(direction, distance);
+        set_position({position.x + movement.x, position.y + movement.y});
+    }
+
+    // draw the character onto the screen
+    void draw()
+    {
+        double model_width = bitmap_width(get_model());
+        double model_height = bitmap_height(get_model());
+        double model_scaling = get_model_scaling();
+
+        // fixing bitmap scaling position
+        double pos_x = get_position().x + (((model_width * model_scaling) - model_width) / 2);
+        double pos_y = get_position().y + (((model_height * model_scaling) - model_height) / 2);
+
+        // flip when facing opposite direction
+        if (get_is_facing_right())
+        {
+            draw_bitmap(get_model(), pos_x, pos_y, option_scale_bmp(model_scaling, model_scaling));
+        }
+        else
+        {
+            draw_bitmap(get_model(), pos_x, pos_y, option_flip_y(option_scale_bmp(model_scaling, model_scaling)));
+        }
+
+        draw_rectangle(color_red(), get_hurtbox().x, get_hurtbox().y, get_hurtbox().width, get_hurtbox().height); // FIXME: hide hurtbox
+    }
+
     int get_health()
     {
         return health;
@@ -263,9 +319,72 @@ public:
         this->position = position;
     }
 
+    // set the direction the character is facing (true is right, false is left)
     void set_is_facing_right(bool facing_right)
     {
         model_facing_right = facing_right;
+    }
+};
+
+// class for npcs in the game
+class npc_data : public character_data
+{
+private:
+    coordinate new_position;    // the position the npc is moving to
+    int auto_move_max_distance; // the range at which the new_position can be from its current position (in a square)
+
+    // move the npc to a random position within a range automatically
+    void auto_move(int delta_time)
+    {
+        int new_position_x = (int)new_position.x;
+        int new_position_y = (int)new_position.y;
+
+        // determines if NPC is at the destination, allows an error of (+-)1 pixel due to the float to int conversion
+        bool x_at_destination = ((int)position.x >= new_position_x - 1) && ((int)position.x <= new_position_x + 1);
+        bool y_at_destination = ((int)position.y >= new_position_y - 1) && ((int)position.y <= new_position_y + 1);
+
+        // if the npc is at the destination, generate a new destination
+        if (x_at_destination && y_at_destination)
+        {
+            coordinate min_coords = {get_position().x - auto_move_max_distance, get_position().y - auto_move_max_distance};
+            coordinate max_coords = {get_position().x + auto_move_max_distance, get_position().y + auto_move_max_distance};
+            new_position = coordinate().random_coordinate(min_coords, max_coords);
+        }
+
+        // calculate the direction and distance the npc should move
+        vector_2d direction = {0, 0};
+        direction.x = new_position.x - position.x;
+        direction.y = new_position.y - position.y;
+
+        // set the direction the npc is facing
+        if (direction.x > 0)
+        {
+            set_is_facing_right(true);
+        }
+        else
+        {
+            set_is_facing_right(false);
+        }
+
+        // the distance the npc should move according to delta_time
+        double distance = get_speed() * (double)delta_time;
+
+        move(direction, distance);
+    }
+
+public:
+    npc_data(double model_size, coordinate spawn_coords)
+        : character_data(1, 3.75 * get_tile_size() / 1000, load_bitmap("npc_idle", "./image_data/npc/npc_idle.png"), true, model_size, spawn_coords)
+    {
+        new_position = spawn_coords;
+        auto_move_max_distance = 5 * get_tile_size();
+    }
+
+    // update the npc's position and hurtbox, should always be ran inside the game loop
+    void update(int delta_time)
+    {
+        auto_move(delta_time);
+        update_hurtbox();
     }
 };
 
@@ -285,8 +404,7 @@ struct sword_data
     sword_phase phase;
 };
 
-// TODO: move all the default values to the constructor
-// player info struct
+// player info struct, players can attack
 class player_data : public character_data
 {
 private:
@@ -296,10 +414,10 @@ private:
     rectangle hitbox;
     int hitbox_lasting_time; // ms
     sword_data sword;
-
     double attack_cooldown;
     bool can_attack;
 
+    // main function for attacking, controls the attacking animation, and the time the hitbox is active (according to attack_speed)
     void attacking()
     {
         if (attack_cooldown < attack_speed)
@@ -318,7 +436,22 @@ private:
         }
     }
 
-    // update the hitbox to align with the player's position
+    // update the attack cooldown, and the attack state
+    void update_attack_cooldown(double delta_time)
+    {
+        attack_cooldown += delta_time;
+
+        if (attack_cooldown >= attack_speed * 2)
+        {
+            can_attack = true;
+            is_attacking = false;
+            attack_cooldown = 0;
+        }
+        else
+            can_attack = false;
+    }
+
+    // update the sword's hitbox to align with the player's position
     void update_hitbox()
     {
         double player_model_width = bitmap_width(get_model());
@@ -341,12 +474,14 @@ private:
             hitbox_size_y = 0;
         }
 
+        // align the sword's hitbox with the player's direction
         if (get_is_facing_right())
             hitbox = {position.x + (player_model_width * get_model_scaling()), position.y, hitbox_size_x, hitbox_size_y};
         else
             hitbox = {position.x - hitbox_size_x, position.y, hitbox_size_x, hitbox_size_y};
     }
 
+    // update the player's hitbox and hurtbox
     void update_box()
     {
         update_hitbox();
@@ -369,6 +504,7 @@ public:
         double model_width = bitmap_width(get_model());
         double model_height = bitmap_height(get_model());
 
+        // call update box to set the hitbox and hurtbox
         update_box();
 
         // setting sword struct
@@ -390,23 +526,14 @@ public:
             sword.model_scaling = model_size / sword_model_height;
         }
 
+        // calling update to set the sword's position
         update_sword();
     }
 
     player_data(double model_size)
         : player_data(model_size, {0, 0}) {}
 
-    // getters and setters
-    // int get_attack_speed()
-    // {
-    //     return attack_speed;
-    // }
-
-    // void set_attack_speed(int attack_speed)
-    // {
-    //     this->attack_speed = attack_speed;
-    // }
-
+    // attack function to call the player to attack (only if the player can attack)
     void attack()
     {
         if (can_attack)
@@ -438,61 +565,24 @@ public:
         }
     }
 
-    // must be ran inside game loop
-    void update_attack_cooldown(double delta_time)
-    {
-        attack_cooldown += delta_time;
-
-        if (attack_cooldown >= attack_speed * 2)
-        {
-            can_attack = true;
-            is_attacking = false;
-            attack_cooldown = 0;
-        }
-        else
-            can_attack = false;
-    }
-
-    void update(game_timing_data &game)
+    // must be ran inside game loop, and get delta_time from game_timing_data
+    void update(int delta_time)
     {
         update_box();
         update_sword();
 
         if (is_attacking)
         {
-            update_attack_cooldown(game.get_delta_time());
+            update_attack_cooldown(delta_time);
             attacking();
         }
+
+        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height); // FIXME: hide hitbox
     }
 
     double get_attack_cool_down()
     {
         return attack_cooldown;
-    }
-
-    // draw player onto screen
-    void draw_player()
-    {
-        double model_width = bitmap_width(get_model());
-        double model_height = bitmap_height(get_model());
-        double model_scaling = get_model_scaling();
-
-        // fixing bitmap scaling position
-        double pos_x = position.x + (((model_width * model_scaling) - model_width) / 2);
-        double pos_y = position.y + (((model_height * model_scaling) - model_height) / 2);
-
-        // flip when facing opposite direction
-        if (get_is_facing_right())
-        {
-            draw_bitmap(get_model(), pos_x, pos_y, option_scale_bmp(model_scaling, model_scaling));
-        }
-        else
-        {
-            draw_bitmap(get_model(), pos_x, pos_y, option_flip_y(option_scale_bmp(model_scaling, model_scaling)));
-        }
-
-        draw_rectangle(color_red(), get_hurtbox().x, get_hurtbox().y, get_hurtbox().width, get_hurtbox().height); // FIXME: hide hurtbox
-        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height);                             // FIXME: hide hitbox
     }
 
     // draw player's sword onto screen
@@ -536,31 +626,33 @@ void move_player(player_data &player, double delta_time)
     // calculating distance using delta_time to avoid game lag issues
     double distance = player.get_speed() * delta_time;
 
+    // setting the direction of the movement
+    vector_2d direction = {0, 0};
+
     if (key_down(W_KEY))
     {
-        coordinate new_position = {player.get_position().x, player.get_position().y - distance};
-        player.set_position(new_position);
+        direction.y = -1;
     }
     if (key_down(S_KEY))
     {
-        coordinate new_position = {player.get_position().x, player.get_position().y + distance};
-        player.set_position(new_position);
+        direction.y = 1;
     }
     if (key_down(A_KEY))
     {
-        coordinate new_position = {player.get_position().x - distance, player.get_position().y};
-        player.set_position(new_position);
+        direction.x = -1;
         player.set_is_facing_right(false);
     }
     if (key_down(D_KEY))
     {
-        coordinate new_position = {player.get_position().x + distance, player.get_position().y};
-        player.set_position(new_position);
+        direction.x = 1;
         player.set_is_facing_right(true);
     }
+
+    // call move function in chacter_data to move along the direction and distance
+    player.move(direction, distance);
 }
 
-// controls timing and cooldown of player attack, sets player.is_attacking to true
+// controls the player's attack, calls the player to attack if button is pressed
 void player_attack(player_data &player)
 {
     if ((key_down(SPACE_KEY) || mouse_clicked(LEFT_BUTTON)))
@@ -569,6 +661,7 @@ void player_attack(player_data &player)
     }
 }
 
+// control to slow time, used for the focusing ability
 void slow_time(game_timing_data &game_timing)
 {
     if (key_down(LEFT_SHIFT_KEY) || mouse_down(RIGHT_BUTTON))
@@ -577,7 +670,7 @@ void slow_time(game_timing_data &game_timing)
         game_timing.set_time_rate(1);
 }
 
-// function to control character
+// function to control character, must be called in the game loop
 void control_player(player_data &player, game_timing_data &game_timing)
 {
     move_player(player, game_timing.get_delta_time());
@@ -593,6 +686,10 @@ int main()
     room_data room({(ROOM_WIDTH - 1) / 2, (ROOM_HEIGHT - 1) - 2}); // -2 because one for the wall, one for the leg (player coord is at the head));
     player_data player(get_tile_size(), room.get_spawn_coords());
 
+    // FIXME: delete, or implement arrays of npcs
+    coordinate max_tile_coords = {ROOM_WIDTH, ROOM_HEIGHT};
+    npc_data npc(get_tile_size(), coordinate().random_coordinate(max_tile_coords.tile_to_pixel()));
+
     while (!quit_requested())
     {
         // setting game timing
@@ -606,8 +703,11 @@ int main()
 
         room.draw();
 
-        player.update(game_timing);
-        player.draw_player();
+        npc.update(game_timing.get_delta_time());
+        npc.draw();
+
+        player.update(game_timing.get_delta_time());
+        player.draw();
 
         control_player(player, game_timing);
 
