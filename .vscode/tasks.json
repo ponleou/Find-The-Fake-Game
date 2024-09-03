@@ -8,7 +8,8 @@
                 "-fdiagnostics-color=always",
                 "-g",
                 "${file}",
-                "-l SplashKit",
+                "-l",
+                "SplashKit",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"
             ],
