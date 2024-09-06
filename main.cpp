@@ -9,26 +9,128 @@ double ease_out_quint(double x)
     return 1 - std::pow(1 - x, 5);
 }
 
+struct ease_data
+{
+    double increase;
+    double change_by;
+    double initial_value;
+    double value;
+
+    ease_data()
+    {
+        increase = 0;
+        change_by = 0;
+        initial_value = 0;
+        value = 0;
+    }
+
+    void ease_value(double *value, double to_value, double (*ease_func)(double), double increment_rate)
+    {
+        if (this->change_by != to_value - *value)
+        {
+            increase = 0;
+        }
+
+        if (increase == 0)
+        {
+            initial_value = *value;
+            change_by = to_value - *value;
+        }
+
+        increase += increment_rate;
+
+        if (increase >= 1)
+        {
+            increase = 1;
+        }
+
+        double eased = ease_func(increase);
+        *value = initial_value + eased * change_by;
+    }
+
+    double ease_value(double to_value, double (*ease_func)(double), double increment_rate)
+    {
+        if (this->change_by != to_value - value)
+        {
+            increase = 0;
+        }
+
+        if (increase == 0)
+        {
+            this->initial_value = value;
+            change_by = to_value - value;
+        }
+
+        increase += increment_rate;
+
+        if (increase >= 1)
+        {
+            increase = 1;
+        }
+
+        double eased = ease_func(increase);
+        value = initial_value + eased * change_by;
+
+        return value;
+    }
+};
+
+// data type for coorindates, can be used for both pixel and tile coordinates
+// tile coordinates are the coordinates of the tiles in the room (room_data)
+struct coordinate
+{
+    double x, y;
+
+    // to convert tile coorindates to pixel coordinates
+    coordinate tile_to_pixel(double tile_size)
+    {
+        return {x * tile_size, y * tile_size};
+    }
+
+    // to convert pixel coordinates to tile coordinates of the room
+    coordinate pixel_to_tile(double tile_size)
+    {
+        double pixel_x = ceil(x / tile_size) - 1;
+        double pixel_y = ceil(y / tile_size) - 1;
+        return {pixel_x, pixel_y};
+    }
+};
+
+// generate random coordinates
+coordinate random_coordinate(const coordinate &max_coords)
+{
+    return {(double)rnd(max_coords.x), (double)rnd(max_coords.y)};
+}
+
+coordinate random_coordinate(const coordinate &min_coords, const coordinate &max_coords)
+{
+    return {(double)rnd(min_coords.x, max_coords.x), (double)rnd(min_coords.y, max_coords.y)};
+}
+
 // make a game size struct
 class game_size_data
 {
 private:
-    int screen_height;
+    int screen_height; // the height of the screen
+    int screen_width;  // the width of the screen
     int room_width;    // the number of tiles in the room on the x axis
     int room_height;   // the number of tiles in the room on the y axis
     double zoom_level; // the zoom level of the game or screen
 
+    ease_data ease_zoom_level;
+
 public:
     // Constructor
-    game_size_data(int screen_height, int room_width, int room_height)
+    game_size_data(int screen_height, int screen_width, int room_width, int room_height)
     {
         this->screen_height = screen_height;
+        this->screen_width = screen_width;
         this->room_width = room_width;
         this->room_height = room_height;
         this->zoom_level = 1;
     }
 
-    game_size_data() : game_size_data(1080, 40, 30) {}
+    game_size_data() : game_size_data(1080, 1920, 40, 30) {}
 
     // getters and setters
     int get_screen_height() const
@@ -51,50 +153,29 @@ public:
         return zoom_level;
     }
 
+    // set the zoom level of the game
     void set_zoom_level(double zoom_level)
     {
         this->zoom_level = zoom_level;
     }
 
+    void set_zoom_level(double zoom_level, double (*ease_func)(double), double increment_rate)
+    {
+        ease_zoom_level.ease_value(&this->zoom_level, zoom_level, ease_func, increment_rate);
+    }
+
     // screen width is calculated using the screen height and the room width and height
     int get_screen_width() const
     {
-        double width = (double)screen_height * ((double)room_width / (double)room_height);
-        return (int)width;
+        return screen_width;
+    }
+
+    // get the camera position that would keep the parameter coorindate in the center of the screen
+    coordinate get_camera_position(coordinate center_position) const
+    {
+        return {center_position.x - (get_screen_width() / 2), center_position.y - (screen_height / 2)};
     }
 };
-
-// data type for coorindates, can be used for both pixel and tile coordinates
-// tile coordinates are the coordinates of the tiles in the room (room_data)
-struct coordinate
-{
-    double x, y;
-
-    // to convert tile coorindates to pixel coordinates
-    coordinate tile_to_pixel(double tile_size)
-    {
-        return {x * tile_size, y * tile_size};
-    }
-
-    // to convert pixel coordinates to tile coordinates of the room
-    coordinate pixel_to_tile(double tile_size)
-    {
-        double pixel_x = floor(x / tile_size);
-        double pixel_y = floor(y / tile_size);
-        return {pixel_x, pixel_y};
-    }
-};
-
-// generate random coordinates
-coordinate random_coordinate(const coordinate &max_coords)
-{
-    return {(double)rnd(max_coords.x), (double)rnd(max_coords.y)};
-}
-
-coordinate random_coordinate(const coordinate &min_coords, const coordinate &max_coords)
-{
-    return {(double)rnd(min_coords.x, max_coords.x), (double)rnd(min_coords.y, max_coords.y)};
-}
 
 // class to hold the timing data of the game (mostly for the delta time)
 class game_timing_data
@@ -105,6 +186,8 @@ private:
     double time_rate;              // how many seconds the game should load in one second
     int frame_rate;                // the frame rate of the game
     double last_frame_update_time; // the time of the last frame update
+
+    ease_data ease_time_rate;
 
     // get the time it takes for each frame to be displayed to fit frame rate
     double get_frame_delay() const
@@ -147,6 +230,11 @@ public:
     void set_time_rate(double rate)
     {
         time_rate = rate;
+    }
+
+    void set_time_rate(double rate, double (*ease_func)(double), double increment_rate)
+    {
+        ease_time_rate.ease_value(&this->time_rate, rate, ease_func, increment_rate);
     }
 
     // set frame rate, changes the frame rate of the game, tells when the game should update the frame (calling screen_refresh)
@@ -193,7 +281,7 @@ private:
     double zoomed_tile_size; // size of each tile after zooming
 
     // a function to construct the room, used in the constructor
-    void construct_room(int room_width, int room_height, int screen_height, const color &floor_color_1, const color &floor_color_2, const color &wall_color, const coordinate &spawn_tile)
+    void construct_room(int room_width, int room_height, int screen_width, int screen_height, const color &floor_color_1, const color &floor_color_2, const color &wall_color, const coordinate &spawn_tile)
     {
         color_pattern[0] = floor_color_1;
         color_pattern[1] = floor_color_2;
@@ -201,7 +289,14 @@ private:
         this->size_x = room_width;
         this->size_y = room_height;
         this->zoom_level = 1;
-        this->tile_size = (double)(screen_height / room_height);
+
+        double size1 = (double)screen_width / (double)room_width;
+        double size2 = (double)screen_height / (double)room_height;
+        if (size1 >= size2)
+            this->tile_size = size1;
+        else
+            this->tile_size = size2;
+
         this->spawn_coords = spawn_tile;
 
         // update the zoomed tile size (using tile_size and zoom_level)
@@ -225,7 +320,7 @@ private:
     // function to update the zoomed tile size (depending if zoom level is changed)
     void update_zoomed_tile_size()
     {
-        zoomed_tile_size = this->tile_size * zoom_level;
+        zoomed_tile_size = tile_size * zoom_level;
     }
 
     // build the floor of the room (setting floor_array with tiles)
@@ -314,29 +409,29 @@ private:
 public:
     // FIXME: each tile should also record its pixel coordinate // FIXME: wait why?
     // Constructor
-    room_data(int floor_width, int floor_height, double screen_height)
+    room_data(int floor_width, int floor_height, int screen_width, int screen_height)
     {
         // setting room color
         color slate_grey = rgb_color(112, 128, 144);
         color light_slate_grey = rgb_color(132, 144, 153);
         color light_steel_blue = rgb_color(150, 170, 200);
 
-        construct_room(floor_width, floor_height, screen_height, slate_grey, light_slate_grey, light_steel_blue, {(double)(floor_width - 1) / 2, (double)(floor_height - 1) - 2});
+        construct_room(floor_width, floor_height, screen_width, screen_height, slate_grey, light_slate_grey, light_steel_blue, {(double)(floor_width - 1) / 2, (double)(floor_height - 1) - 2});
     }
 
-    room_data(int floor_width, int floor_height, double screen_height, const coordinate &spawn_coords)
+    room_data(int floor_width, int floor_height, int screen_width, int screen_height, const coordinate &spawn_coords)
     {
         // setting room color
         color slate_grey = rgb_color(112, 128, 144);
         color light_slate_grey = rgb_color(132, 144, 153);
         color light_steel_blue = rgb_color(150, 170, 200);
 
-        construct_room(floor_width, floor_height, tile_size, slate_grey, light_slate_grey, light_steel_blue, spawn_coords);
+        construct_room(floor_width, floor_height, screen_width, screen_height, slate_grey, light_slate_grey, light_steel_blue, spawn_coords);
     }
 
-    room_data(int floor_width, int floor_height, double screen_height, const color &floor_color_1, const color &floor_color_2, const color &wall_color, const coordinate &spawn_coords)
+    room_data(int floor_width, int floor_height, int screen_width, int screen_height, const color &floor_color_1, const color &floor_color_2, const color &wall_color, const coordinate &spawn_coords)
     {
-        construct_room(floor_width, floor_height, screen_height, floor_color_1, floor_color_2, wall_color, spawn_coords);
+        construct_room(floor_width, floor_height, screen_width, screen_height, floor_color_1, floor_color_2, wall_color, spawn_coords);
     }
 
     // building the room, setting the floor and walls, used when new walls are created (must be called in game loop to watch for changes in zoom_level)
@@ -404,6 +499,11 @@ public:
         return walls_vector;
     }
 
+    double get_tile_size() const
+    {
+        return tile_size;
+    }
+
     // sets the wall of the room, using a start and end tile coordinate
     //(the wall is the rectangle from the top left corner of start tile to the bottom right corner of end tile)
     void set_wall(const coordinate &start_tile, const coordinate &end_tile)
@@ -441,8 +541,6 @@ private:
     void update_zoomed_position()
     {
         zoomed_position = {position.x * zoom_level, position.y * zoom_level};
-        write_line("zoomed_position: " + std::to_string(zoomed_position.x) + ", " + std::to_string(zoomed_position.y));
-        // zoomed_position = position; // FIXME: zoomed_position is not used
     }
 
 protected:
@@ -529,6 +627,17 @@ protected:
         return zoom_level;
     }
 
+    void set_position(const coordinate &position)
+    {
+        this->position = position;
+    }
+
+    // get position of the character in colleration to the room
+    const coordinate &get_zoomed_position() const
+    {
+        return zoomed_position;
+    }
+
 public:
     // update the character's position and hurtbox, should always be ran inside the game loop
     void update()
@@ -539,7 +648,7 @@ public:
     }
 
     // move the character in a direction by a distance (overriden by npc_data for better wall walking collision)
-    virtual void move(vector_2d &direction, double distance, const room_data &room)
+    void move(vector_2d &direction, double distance, const room_data &room)
     {
         if (direction.x != 0 || direction.y != 0)
         {
@@ -569,13 +678,15 @@ public:
                     if (intersection(hurtbox, walls_vector[i]).height == 0)
                     {
                         // if no collision, then move the player by y + collision_box.height
-                        set_position({position.x, round(position.y + collision_box.height)});
+                        new_position = {position.x, (position.y + collision_box.height)};
+                        break;
                     }
                     // hurtbox_copy.y = new_position.y - collision_box.height;
                     else
                     {
                         // if collision, then move the player by y - collision_box.height
-                        set_position({position.x, round(position.y - collision_box.height)});
+                        new_position = {position.x, (position.y - collision_box.height)};
+                        break;
                     }
                 }
 
@@ -586,19 +697,21 @@ public:
                     if (intersection(hurtbox, walls_vector[i]).width != 0)
                     {
                         // if no collision, then move the player by x + collision_box.width
-                        set_position({round(position.x - collision_box.width), position.y});
+                        new_position = {(position.x - collision_box.width), position.y};
+                        break;
                     }
                     // hurtbox_copy.x = new_position.x - collision_box.width;
                     else
                     {
                         // if collision, then move the player by x - collision_box.width
-                        set_position({round(position.x + collision_box.width), position.y});
+                        new_position = {(position.x + collision_box.width), position.y};
+                        break;
                     }
                 }
             }
         }
 
-        // set_position(new_position);
+        set_position(new_position);
     }
 
     // draw the character onto the screen
@@ -609,8 +722,8 @@ public:
         double zoomed_model_scaling = get_zoomed_model_scaling();
 
         // fixing bitmap scaling position
-        double pos_x = get_position().x + (((model_width * zoomed_model_scaling) - model_width) / 2);
-        double pos_y = get_position().y + (((model_height * zoomed_model_scaling) - model_height) / 2);
+        double pos_x = get_zoomed_position().x + (((model_width * zoomed_model_scaling) - model_width) / 2);
+        double pos_y = get_zoomed_position().y + (((model_height * zoomed_model_scaling) - model_height) / 2);
 
         // flip when facing opposite direction
         if (get_is_facing_right())
@@ -635,17 +748,6 @@ public:
         return speed;
     }
 
-    // get position of the character in colleration to the room
-    const coordinate &get_position() const
-    {
-        return zoomed_position;
-    }
-
-    void set_position(const coordinate &position)
-    {
-        this->position = position;
-    }
-
     // set the direction the character is facing (true is right, false is left)
     void set_is_facing_right(bool facing_right)
     {
@@ -662,20 +764,72 @@ public:
 class npc_data : public character_data
 {
 private:
-    coordinate new_position;     // the position the npc is moving to
-    int auto_move_max_distance;  // the range at which the new_position can be from its current position (in a square)
+    coordinate new_position;        // the position the npc is moving to
+    coordinate zoomed_new_position; // the position the npc is moving to after zooming
+
+    double auto_move_max_distance;        // the range at which the new_position can be from its current position (in a square)
+    double zoomed_auto_move_max_distance; // the range at which the new_position can be from its current position (in a square) after zooming
+
     int time_since_new_position; // the time since the npc has a new position
     int new_position_cooldown;   // the time the npc should have a new position
+
+    // generates a random position for the npc, that is valid for the npc to move to, or stay at
+    void update_new_position(const room_data &room, coordinate min_coords, coordinate max_coords)
+    {
+        min_coords = min_coords.pixel_to_tile(room.get_zoomed_tile_size());
+        max_coords = max_coords.pixel_to_tile(room.get_zoomed_tile_size());
+
+        do
+        {
+            // generating a random position for the npc to move to converting to tile coordinates
+            new_position = random_coordinate(min_coords, max_coords);
+            // checking if the tile is within the room
+            if (new_position.x < 0 || new_position.x >= room.get_size_x() || new_position.y < 0 || new_position.y >= room.get_size_y())
+            {
+                continue;
+            }
+
+            // make sure the npc can fit inside the new position
+            int player_tile_height = (int)ceil(get_hurtbox().height / room.get_zoomed_tile_size());
+            int player_tile_width = (int)ceil(get_hurtbox().width / room.get_zoomed_tile_size());
+            vector<coordinate> player_tiles;
+
+            for (int i = 0; i < player_tile_height; i++)
+            {
+                for (int j = 0; j < player_tile_width; j++)
+                {
+                    player_tiles.push_back({new_position.x + j, new_position.y + i});
+                }
+            }
+
+            // checking for all tiles the npc will fill in the new position
+            bool valid_position = true;
+
+            for (int i = 0; i < player_tiles.size(); i++)
+            {
+                if (!room.is_passable(player_tiles[i]))
+                {
+                    valid_position = false;
+                    break;
+                }
+            }
+
+            // checking if the npc can fit in the position
+            if (valid_position)
+            {
+                break;
+            }
+        } while (true);
+    }
 
     // move the npc to a random position within a range automatically
     void auto_set_new_position(double delta_time, const room_data &room)
     {
-        int new_position_x = (int)new_position.x;
-        int new_position_y = (int)new_position.y;
+        coordinate position = get_zoomed_position();
 
-        // determines if NPC is at the destination, allows an error of (+-)1 pixel due to the float to int conversion
-        bool x_at_destination = ((int)zoomed_position.x >= new_position_x - 1) && ((int)zoomed_position.x <= new_position_x + 1);
-        bool y_at_destination = ((int)zoomed_position.y >= new_position_y - 1) && ((int)zoomed_position.y <= new_position_y + 1);
+        // determines if NPC is at the destination, allows an error of (+-)10 pixel due to the float to int conversion, and other scalings
+        bool x_at_destination = ((int)position.x >= zoomed_new_position.x - 10) && ((int)position.x <= zoomed_new_position.x + 10);
+        bool y_at_destination = ((int)position.y >= zoomed_new_position.y - 10) && ((int)position.y <= zoomed_new_position.y + 10);
 
         time_since_new_position += delta_time;
         bool cooldown_passed = time_since_new_position >= new_position_cooldown;
@@ -683,52 +837,12 @@ private:
         // if the npc is at the destination or cooldown for new position passed, generate a new destination
         if ((x_at_destination && y_at_destination) || cooldown_passed)
         {
-            coordinate min_coords = {get_position().x - auto_move_max_distance, get_position().y - auto_move_max_distance};
-            coordinate max_coords = {get_position().x + auto_move_max_distance, get_position().y + auto_move_max_distance};
+            coordinate min_coords = {get_zoomed_position().x - zoomed_auto_move_max_distance, get_zoomed_position().y - zoomed_auto_move_max_distance};
+            coordinate max_coords = {get_zoomed_position().x + zoomed_auto_move_max_distance, get_zoomed_position().y + zoomed_auto_move_max_distance};
 
-            do
-            {
-                // generating a random position for the npc to move to converting to tile coordinates
-                new_position = random_coordinate(min_coords, max_coords).pixel_to_tile(room.get_zoomed_tile_size());
-                // checking if the tile is within the room
-                if (new_position.x < 0 || new_position.x >= room.get_size_x() || new_position.y < 0 || new_position.y >= room.get_size_y())
-                {
-                    continue;
-                }
+            update_new_position(room, min_coords, max_coords);
 
-                // make sure the npc can fit inside the new position
-                int player_tile_height = (int)ceil(get_hurtbox().height / room.get_zoomed_tile_size());
-                int player_tile_width = (int)ceil(get_hurtbox().width / room.get_zoomed_tile_size());
-                vector<coordinate> player_tiles;
-
-                for (int i = 0; i < player_tile_height; i++)
-                {
-                    for (int j = 0; j < player_tile_width; j++)
-                    {
-                        player_tiles.push_back({new_position.x + j, new_position.y + i});
-                    }
-                }
-
-                // checking for all tiles the npc will fill in the new position
-                bool valid_position = true;
-
-                for (int i = 0; i < player_tiles.size(); i++)
-                {
-                    if (!room.is_passable(player_tiles[i]))
-                    {
-                        valid_position = false;
-                        break;
-                    }
-                }
-
-                // checking if the npc can fit in the position
-                if (valid_position)
-                {
-                    break;
-                }
-            } while (true);
-
-            new_position = new_position.tile_to_pixel(room.get_zoomed_tile_size()); // converting back to pixel coordinates for the npc to move to
+            new_position = new_position.tile_to_pixel(room.get_tile_size()); // converting back to pixel coordinates for the npc to move to
             time_since_new_position = 0;
         }
     }
@@ -737,8 +851,8 @@ private:
     {
         // calculate the direction and distance the npc should move
         vector_2d direction = {0, 0};
-        direction.x = new_position.x - zoomed_position.x;
-        direction.y = new_position.y - zoomed_position.y;
+        direction.x = zoomed_new_position.x - zoomed_position.x;
+        direction.y = zoomed_new_position.y - zoomed_position.y;
 
         // set the direction the npc is facing
         if (direction.x > 0)
@@ -756,21 +870,42 @@ private:
         move(direction, distance, room);
     }
 
-public:
-    npc_data(double tile_size, double model_size, const coordinate &spawn_coords)
-        : character_data(1, 3.75 * tile_size / 1000, load_bitmap("npc_idle", "./image_data/npc/npc_idle.png"), true, model_size, spawn_coords)
+    void update_zoomed_auto_move_max_distance()
     {
-        new_position = spawn_coords;
+        zoomed_auto_move_max_distance = auto_move_max_distance * get_zoom_level();
+    }
+
+    void update_zoomed_new_position()
+    {
+        zoomed_new_position = {new_position.x * get_zoom_level(), new_position.y * get_zoom_level()};
+    }
+
+public:
+    npc_data(double tile_size, double model_size, const room_data &room)
+        : character_data(1, 4 * tile_size / 1000, load_bitmap("npc_idle", "./image_data/npc/npc_idle.png"), true, model_size, {0, 0})
+    {
         auto_move_max_distance = 10 * tile_size;
-        new_position_cooldown = 10000; // ms
-        time_since_new_position = 0;
+        new_position_cooldown = 5000; // ms
+        time_since_new_position = 0;  // ms
+
+        coordinate max = {(double)(room.get_size_x() - 1), (double)(room.get_size_y() - 1)};
+        coordinate min = {0, 0};
+        update_new_position(room, min.tile_to_pixel(room.get_zoomed_tile_size()), max.tile_to_pixel(room.get_zoomed_tile_size()));
+
+        new_position = new_position.tile_to_pixel(room.get_zoomed_tile_size());
+
+        set_position(new_position);
+        update_zoomed_auto_move_max_distance();
+        update_zoomed_new_position();
     }
 
     // update the npc's position and hurtbox, should always be ran inside the game loop
     void update(double delta_time, const room_data &room)
     {
+        update_zoomed_auto_move_max_distance();
+        update_zoomed_new_position();
         auto_set_new_position(delta_time, room);
-        draw_rectangle(color_red(), new_position.x, new_position.y, room.get_zoomed_tile_size(), room.get_zoomed_tile_size()); // FIXME: hide new position
+        draw_rectangle(color_red(), zoomed_new_position.x, zoomed_new_position.y, room.get_zoomed_tile_size(), room.get_zoomed_tile_size()); // FIXME: hide new position
 
         auto_move(delta_time, room);
 
@@ -1013,6 +1148,12 @@ public:
                 draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / (player_model_height / player_model_width) * model_scaling), option_flip_y(option_scale_bmp(scaling, scaling)));
         }
     }
+
+    // get the player's center position on the screen
+    coordinate get_center_position() const
+    {
+        return {zoomed_position.x + (bitmap_width(get_model()) * get_zoomed_model_scaling()) / 2, zoomed_position.y + (bitmap_height(get_model()) * get_zoomed_model_scaling()) / 2};
+    }
 };
 
 // function to calculate and change position of player
@@ -1057,85 +1198,109 @@ void player_attack(player_data &player)
 }
 
 // control to slow time, used for the focusing ability
-void slow_time(game_timing_data &game_timing, game_size_data &game_size)
+void slow_time(game_timing_data &game_timing, game_size_data &game_size, ease_data &ease)
 {
+    point_2d camera_pos = camera_position();
+
     if (key_down(LEFT_SHIFT_KEY) || mouse_down(RIGHT_BUTTON))
     {
-        game_timing.set_time_rate(0.5); // FIXME: not correct, time rate is definitely not 0.5
-        game_size.set_zoom_level(2);
+        game_timing.set_time_rate(0.35, ease_out_quint, 0.01);
+        game_size.set_zoom_level(2, ease_out_quint, 0.01);
+
+        // drawing effects on screen
+
+        // vignetted screen
+        double vignette_width = bitmap_width("vignette");
+        double vignette_height = bitmap_height("vignette");
+        double screen_x = screen_width();
+        double screen_y = screen_height();
+        double scale_x = screen_x / vignette_width;
+        double scale_y = screen_y / vignette_height;
+        draw_bitmap("vignette", camera_pos.x + (((vignette_width * scale_x) - vignette_width) / 2), camera_pos.y + (((vignette_height * scale_y) - vignette_height) / 2), (option_scale_bmp(scale_x, scale_y)));
+        // color to desaturate the screen
+        fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.5, ease_out_quint, 0.01)), camera_pos.x, camera_pos.y, screen_width(), screen_height());
     }
     else
     {
-        game_timing.set_time_rate(1);
-        game_size.set_zoom_level(1);
+        game_timing.set_time_rate(1, ease_out_quint, 0.01);
+        game_size.set_zoom_level(1, ease_out_quint, 0.01);
+
+        // removing destauration on screen
+        fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.0, ease_out_quint, 0.01)), camera_pos.x, camera_pos.y, screen_width(), screen_height());
     }
 }
 
 // function to control character, must be called in the game loop
-void control_player(player_data &player, game_timing_data &game_timing, game_size_data &game_size, const room_data &room)
+void control_player(player_data &player, game_timing_data &game_timing, game_size_data &game_size, const room_data &room, ease_data &ease)
 {
     move_player(player, game_timing.get_delta_time(), room);
     player_attack(player);
-    slow_time(game_timing, game_size);
+    slow_time(game_timing, game_size, ease);
 }
 
 int main()
 {
-    int number_loops = 0;
-    int total_delta = 0;
-    game_size_data game_size(1080, 40, 30);
+    load_bitmap("vignette", "./image_data/vignette/vignette.png");
+    ease_data ease;
 
-    open_window("Find The Imposter.exe", game_size.get_screen_width(), game_size.get_screen_height());
+    game_size_data game_size(1080, 1920, 40, 25);
 
-    int npc_count = 5;
+    open_window("Find The Fake", game_size.get_screen_width(), game_size.get_screen_height());
+
+    int npc_count = 10;
 
     game_timing_data game_timing(120);
-    room_data room(40, 30, game_size.get_screen_height());
+    room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
     double tile_size = room.get_zoomed_tile_size();
 
     player_data player(tile_size, tile_size, room.get_spawn_coords());
-
-    // FIXME: delete, or implement arrays of npcs
 
     coordinate min_tile_coords = {1, 1};
     coordinate max_tile_coords = {(double)(game_size.get_room_width() - 2), (double)(game_size.get_room_height() - 2)};
     // npc_data npc(get_tile_size(), coordinate().random_coordinate(max_tile_coords.tile_to_pixel()));
 
-    vector<npc_data *> npcs(npc_count);
+    room.set_wall({10, 10}, {20, 20}); // FIXME: delete test wall
+    room.set_zoom_level(game_size.get_zoom_level());
+    room.build_room();
 
+    vector<npc_data *> npcs(npc_count);
     for (int i = 0; i < npc_count; i++)
     {
-        npcs[i] = new npc_data(tile_size, tile_size, random_coordinate(min_tile_coords.tile_to_pixel(tile_size), max_tile_coords.tile_to_pixel(tile_size)));
+        npcs[i] = new npc_data(tile_size, tile_size, room);
+        npcs[i]->set_zoom_level(game_size.get_zoom_level());
+        npcs[i]->update(game_timing.get_delta_time(), room);
     }
-
-    room.set_wall({10, 10}, {20, 20}); // FIXME: delete test wall
-
     while (!quit_requested())
     {
         // setting game timing
         game_timing.update_timing();
 
-        // TODO: HERE IS THE CAMERA FUNCTION
-        // point_2d pt = {-50, 500};
-        // set_camera_position(pt);
-
-        clear_screen(COLOR_WHITE);
-        room.set_zoom_level(game_size.get_zoom_level());
-        room.build_room();
-        room.draw();
+        // draw screen
+        clear_screen(rgb_color(150, 170, 200));
 
         for (int i = 0; i < npc_count; i++)
         {
             npcs[i]->set_zoom_level(game_size.get_zoom_level());
             npcs[i]->update(game_timing.get_delta_time(), room);
-            npcs[i]->draw();
         }
 
         player.set_zoom_level(game_size.get_zoom_level());
+
+        room.set_zoom_level(game_size.get_zoom_level());
+        room.build_room();
+
+        coordinate center_pos = game_size.get_camera_position(player.get_center_position());
+        set_camera_position({center_pos.x, center_pos.y});
+
+        room.draw();
+        for (int i = 0; i < npc_count; i++)
+        {
+            npcs[i]->draw();
+        }
         player.update(game_timing.get_delta_time());
         player.draw();
 
-        control_player(player, game_timing, game_size, room);
+        control_player(player, game_timing, game_size, room, ease);
 
         if (game_timing.update_frame())
         {
