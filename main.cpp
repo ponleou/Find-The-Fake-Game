@@ -256,10 +256,10 @@ public:
     // must be ran inside a game loop in order to update the delta time
     void update_timing()
     {
-        time_difference = (double)current_ticks() - (double)last_update_time; // getting delta_time
-        last_update_time = (double)current_ticks();                           // setting the last update time
-        last_frame_update_time += time_difference;                            // adding the delta time to the last frame update time
-        delta_time = time_difference * time_rate;                             // changing the delta time according to the time rate
+        time_difference = (double)timer_ticks("Main timer") - (double)last_update_time; // getting delta_time
+        last_update_time = (double)timer_ticks("Main timer");                           // setting the last update time
+        last_frame_update_time += time_difference;                                      // adding the delta time to the last frame update time
+        delta_time = time_difference * time_rate;                                       // changing the delta time according to the time rate
     }
 
     // setters and getters
@@ -297,7 +297,6 @@ public:
     }
 };
 
-// TODO: for the zoom camera: tile_data must have its own position, position set when creating floor array
 // floor tile struct
 struct tile_data
 {
@@ -797,8 +796,6 @@ public:
         {
             draw_bitmap(get_model(), pos_x, pos_y, option_flip_y(option_scale_bmp(zoomed_model_scaling, zoomed_model_scaling)));
         }
-
-        draw_rectangle(color_red(), get_hurtbox().x, get_hurtbox().y, get_hurtbox().width, get_hurtbox().height); // FIXME: hide hurtbox
     }
 
     // check if the character's hurtbox is colliding with a hitbox
@@ -1023,6 +1020,11 @@ public:
         character_data::update();
     }
 
+    void set_health(int health)
+    {
+        character_data::set_health(health);
+    }
+
     // friends with monster_data to allow monster_data to access npc_data's private members (used as disguise)
     friend class monster_data;
 };
@@ -1091,6 +1093,7 @@ private:
 
             return;
         }
+        sword.phase = NO_SWORD; // doesnt draw the sword on the screen if the phase is no sword
     }
 
     // update the attack cooldown, and the attack state
@@ -1202,6 +1205,8 @@ public:
     // update the sword's position to align with the player's position
     void update_sword()
     {
+        sword.phase = NO_SWORD; // default phase is no sword
+
         update_sword_zoomed_model_scaling();
 
         double player_model_width = bitmap_width(get_model());
@@ -1298,7 +1303,6 @@ public:
 
         character_data::draw();
         draw_sword();
-        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height); // FIXME: hide hitbox
     }
 };
 
@@ -1402,7 +1406,7 @@ public:
 
         // creating an npc object for the monster to disguise as
         disguise = new npc_data(tile_size, model_disguise_size, room, bitmap_disguise_name);
-        player_detection_range = 5 * tile_size;
+        player_detection_range = 4 * tile_size;
         escaped_player = true;
         update_hitbox();
     }
@@ -1548,17 +1552,34 @@ void player_attack(player_data &player)
 }
 
 // function to draw the vignette on the screen
-void draw_vignette()
+void draw_vignette(double scale = 1)
 {
+    // camera position
     point_2d camera_pos = camera_position();
 
+    // lengths and widths
     double vignette_width = bitmap_width("vignette");
     double vignette_height = bitmap_height("vignette");
     double screen_x = screen_width();
     double screen_y = screen_height();
-    double scale_x = screen_x / vignette_width;
-    double scale_y = screen_y / vignette_height;
-    draw_bitmap("vignette", camera_pos.x + (((vignette_width * scale_x) - vignette_width) / 2), camera_pos.y + (((vignette_height * scale_y) - vignette_height) / 2), (option_scale_bmp(scale_x, scale_y)));
+
+    // scaling the vignette to fit the screen and custom scaling
+    double scale_x = (screen_x / vignette_width) * scale;
+    double scale_y = (screen_y / vignette_height) * scale;
+
+    // getting the camera's cetner
+    double camera_center_x = camera_pos.x + (screen_x / 2);
+    double camera_center_y = camera_pos.y + (screen_y / 2);
+
+    // getting the distance of the center of the vignette
+    double vignette_center_x = (vignette_width * scale_x) / 2;
+    double vignette_center_y = (vignette_height * scale_y) / 2;
+
+    // getting the x and y position to draw the vignette (with aligning error fix from bitmap scaling)
+    double x = (camera_center_x - vignette_center_x) + (((vignette_width * scale_x) - vignette_width) / 2);
+    double y = (camera_center_y - vignette_center_y) + (((vignette_height * scale_y) - vignette_height) / 2);
+
+    draw_bitmap("vignette", x, y, (option_scale_bmp(scale_x, scale_y)));
 }
 
 // control to slow time, used for the focusing ability
@@ -1599,20 +1620,159 @@ void control_player(player_data &player, game_timing_data &game_timing, const ro
     player_attack(player);
 }
 
-double timer_countdown(int time_limit)
+// function to contol counter for the game, minimum is 0
+double timer_countdown(int time_limit, bool timer_over)
 {
-    return ((double)time_limit - (double)current_ticks()) / 1000;
+    if (timer_over)
+    {
+        return 0;
+    }
+
+    double timer = (double)time_limit - (double)timer_ticks("Main timer");
+    if (timer <= 0)
+    {
+        timer = 0;
+    }
+    return timer;
 }
 
-void count_down_warning(double time_left, int time_start_warning, room_data &room)
+// change color of the room as timer goes down, change from initial color to new color array
+void change_color(double time_left, int time_start_warning, room_data &room, color initial_color_array[3], color new_color_array[3])
 {
-    color color_1 = rgb_color(139, 0, 0); // dark red, for new wall
-    color color_2 = rgb_color(0, 0, 0);
-    color color_3 = rgb_color(68, 68, 68);
+    // floor 1
+    float floor_1_r_change = (new_color_array[0].r - initial_color_array[0].r) * (1 - (time_left / time_start_warning));
+    float floor_1_g_change = (new_color_array[0].g - initial_color_array[0].g) * (1 - (time_left / time_start_warning));
+    float floor_1_b_change = (new_color_array[0].b - initial_color_array[0].b) * (1 - (time_left / time_start_warning));
+    color floor_1_change = rgb_color(initial_color_array[0].r + floor_1_r_change, initial_color_array[0].g + floor_1_g_change, initial_color_array[0].b + floor_1_b_change);
 
+    // floor 2
+    float floor_2_r_change = (new_color_array[1].r - initial_color_array[1].r) * (1 - (time_left / time_start_warning));
+    float floor_2_g_change = (new_color_array[1].g - initial_color_array[1].g) * (1 - (time_left / time_start_warning));
+    float floor_2_b_change = (new_color_array[1].b - initial_color_array[1].b) * (1 - (time_left / time_start_warning));
+    color floor_2_change = rgb_color(initial_color_array[1].r + floor_2_r_change, initial_color_array[1].g + floor_2_g_change, initial_color_array[1].b + floor_2_b_change);
+
+    // wall
+    float wall_r_change = (new_color_array[2].r - initial_color_array[2].r) * (1 - (time_left / time_start_warning));
+    float wall_g_change = (new_color_array[2].g - initial_color_array[2].g) * (1 - (time_left / time_start_warning));
+    float wall_b_change = (new_color_array[2].b - initial_color_array[2].b) * (1 - (time_left / time_start_warning));
+    color wall_change = rgb_color(initial_color_array[2].r + wall_r_change, initial_color_array[2].g + wall_g_change, initial_color_array[2].b + wall_b_change);
+
+    // setting the new color as timer goes down
+    room.set_color_pattern(floor_1_change, floor_2_change, wall_change);
+}
+
+// visual warnings as timer goes down, change color and draw vignette zooming in
+void count_down_warning(double time_left, int time_start_warning, room_data &room, color initial_color_array[3], ease_data &ease, double delta_time)
+{
     if (time_left < time_start_warning)
     {
-        const color *color_array = room.get_color_pattern();
+        color new_color_array[3] = {
+            rgb_color(0, 0, 0),
+            rgb_color(68, 68, 68),
+            rgb_color(139, 0, 0),
+        };
+        change_color(time_left, time_start_warning, room, initial_color_array, new_color_array);
+
+        // vignette zooming in as timer goes down, from initial scale to final scale
+        double initial_vignette_scale = 5;
+        double final_vignette_scale = 1.5;
+        double scale = initial_vignette_scale - ((initial_vignette_scale - final_vignette_scale) * (1 - (time_left / time_start_warning)));
+        draw_vignette(scale);
+        if (time_left <= 0)
+        {
+            point_2d camera_pos = camera_position();
+            fill_rectangle(rgba_color(new_color_array[2].r, new_color_array[2].g, new_color_array[2].b, ease.ease_value(0.1, delta_time)), camera_pos.x, camera_pos.y, screen_width(), screen_height());
+        }
+    }
+}
+
+void draw_timer(double time_left, double window_width, double window_height)
+{
+    // drawing the time left on the screen (timer countdown)
+    string time_left_string = std::to_string(time_left);
+
+    int text_h = text_height(std::to_string(time_left), get_system_font(), window_height * 0.05);
+    int text_w = text_width(std::to_string(time_left), get_system_font(), window_height * 0.05);
+
+    double text_pos_x = camera_position().x + ((double)window_width / 2.0);
+    double text_pos_y = camera_position().y + ((double)window_height * 0.05);
+
+    double text_center_x = text_pos_x - (text_w / 2);
+    double text_center_y = text_pos_y - (text_h / 2);
+
+    draw_text(std::to_string(time_left), color_white(), get_system_font(), window_height * 0.05, text_center_x, text_center_y);
+}
+
+void timer_out(vector<npc_data *> &npcs, monster_data &monster)
+{
+    // if the timer is out, the monster will be exposed
+    monster.set_expose_self(true);
+
+    // if the timer is out, the npcs will be exposed
+    for (int i = 0; i < npcs.size(); i++)
+    {
+        npcs[i]->set_health(0);
+    }
+}
+
+// draw the end screen, either game won or game lost
+void draw_end_screen(bool game_won, bool game_lost, double window_width, double window_height)
+{
+    // setting font sizes
+    double font_size = window_height * 0.15;
+    double font_size_small = font_size * 0.2;
+
+    // setting the position of the text according to the camera
+    double pos_x = camera_position().x + ((double)window_width / 2.0);
+    double pos_y = camera_position().y + ((double)window_height / 3.0);
+
+    // pos_y2 is for the subtext
+    double pos_y2 = camera_position().y + (((double)window_height / 3.0) * 2);
+
+    // text and subtext will have the same x position
+
+    if (game_won)
+    {
+        string text = "Level Complete!";
+        double text_h = text_height(text, get_system_font(), font_size);
+        double text_w = text_width(text, get_system_font(), font_size);
+
+        double text_center_x = pos_x - (text_w / 2);
+        double text_center_y = pos_y - (text_h / 2);
+
+        string sub_text = "Press Esc to Continue";
+
+        double sub_text_h = text_height(sub_text, get_system_font(), font_size_small);
+        double sub_text_w = text_width(sub_text, get_system_font(), font_size_small);
+
+        double sub_text_center_x = pos_x - (sub_text_w / 2);
+        double sub_text_center_y = pos_y2 - (sub_text_h / 2);
+
+        fill_rectangle(rgba_color(255.0, 255.0, 255.0, 0.5), camera_position().x, camera_position().y, window_width, window_height);
+        draw_text(text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
+        draw_text(sub_text, color_white(), get_system_font(), font_size_small, sub_text_center_x, sub_text_center_y);
+    }
+    if (game_lost)
+    {
+        string text = "Game Over!";
+
+        double text_h = text_height(text, get_system_font(), font_size);
+        double text_w = text_width(text, get_system_font(), font_size);
+
+        double text_center_x = pos_x - (text_w / 2);
+        double text_center_y = pos_y - (text_h / 2);
+
+        string sub_text = "Press Esc to Restart";
+
+        double sub_text_h = text_height(sub_text, get_system_font(), font_size_small);
+        double sub_text_w = text_width(sub_text, get_system_font(), font_size_small);
+
+        double sub_text_center_x = pos_x - (sub_text_w / 2);
+        double sub_text_center_y = pos_y2 - (sub_text_h / 2);
+
+        fill_rectangle(rgba_color(129.0, 0.0, 0.0, 0.5), camera_position().x, camera_position().y, window_width, window_height);
+        draw_text(text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
+        draw_text(sub_text, color_white(), get_system_font(), font_size_small, sub_text_center_x, sub_text_center_y);
     }
 }
 
@@ -1627,158 +1787,210 @@ int main()
     load_bitmap("monster", "./image_data/monster/monster.png");
 
     // set up game variables
-    int game_level = 0; // level starts from 0, will increment to 1 when the game starts
+    int game_level = 1; // starts at level 1, increases by 1 each level
     int window_width = 1920;
     int window_height = 1080;
     int frame_rate = 120;
-    int time_limit = 60000; // ms
-
-    int room_width = rnd(20, 60);
-    int room_height = rnd(20, 60);
-    // time limit for the game, to find the monster
-    // number of npcs in the room
-    int npc_count = 10;
-
-    // creating game objects
-    game_size_data game_size(window_height, window_width, room_width, room_height);
-    game_timing_data game_timing(frame_rate);
 
     // open window
-    open_window("Find The Fake", game_size.get_screen_width(), game_size.get_screen_height());
+    open_window("Find The Fake", window_width, window_height);
+    create_timer("Main timer");
+    start_timer("Main timer");
 
-    // building the room object
-    room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
-    room.set_wall({10, 10}, {20, 20}); // FIXME: delete test wall
-    room.set_zoom_level(game_size.get_zoom_level());
-    room.build_room();
-
-    double tile_size = room.get_zoomed_tile_size();
-
-    // creating player and npc objects
-    double player_model_size = tile_size;
-    player_data player(tile_size, player_model_size, room.get_spawn_coords(), "player_idle");
-
-    double npc_model_size = tile_size;
-    vector<npc_data *> npcs(npc_count); // keeping all the npcs in the room in a vector (there are multiple npcs in the room)
-    for (int i = 0; i < npc_count; i++)
-    {
-        npcs[i] = new npc_data(tile_size, npc_model_size, room, "npc_idle");
-        npcs[i]->set_zoom_level(game_size.get_zoom_level());
-        npcs[i]->update(game_timing.get_delta_time(), room);
-    }
-
-    // creating monster object
-    double monster_model_size = tile_size * 2.4;
-    monster_data monster(tile_size, npc_model_size, monster_model_size, room, "npc_idle", "monster");
-    monster.set_zoom_level(game_size.get_zoom_level());
-    monster.update(game_timing.get_delta_time(), room, player);
-
-    // setting up easing functions and objects to be used
-    ease_data highlight_ease;
-    highlight_ease.ease_func = &ease_out_quint;
-    highlight_ease.time_to_ease = 10000;
-
-    ease_data time_rate_ease;
-    time_rate_ease.ease_func = &ease_out_quint;
-
-    ease_data zoom_level_ease;
-    zoom_level_ease.ease_func = &ease_out_quint;
-
-    ease_data filter_ease;
-    filter_ease.ease_func = &ease_out_quint;
-
-    const color *color_array = room.get_color_pattern();
-    color floor_1 = color_array[0];
-    color floor_2 = color_array[1];
-    color wall = color_array[2];
-
-    // game loop
     while (!quit_requested())
     {
-        // setting game timing
-        game_timing.update_timing();
-        // skip frame if no time has passed (fast computers can have time difference of 0)
-        if (game_timing.get_time_difference() == 0)
-        {
-            continue;
-        }
 
-        // clear screen
-        clear_screen(wall);
+        int time_limit = 60000;  // ms
+        bool timer_over = false; // when timer_over is true, timer runs down to 0 instantly
+        bool game_won = false;
+        bool game_lost = false;
 
-        // updating player, npcs, and monster by calling their update functions, setting their zoom level, and checking for hitbox collision
-        for (int i = 0; i < npc_count; i++)
-        {
-            npcs[i]->set_zoom_level(game_size.get_zoom_level());
-            npcs[i]->update(game_timing.get_delta_time(), room);
-            npcs[i]->check_hitbox_collision(player.get_hitbox());
-        }
+        int room_width = rnd(20, 60);
+        int room_height = rnd(20, 60);
+        // time limit for the game, to find the monster
+        // number of npcs in the room
+        int npc_count = game_level + 1; // number of npcs increases by 1 each level
 
-        player.set_zoom_level(game_size.get_zoom_level());
-        player.update(game_timing.get_delta_time());
-        player.check_hitbox_collision(monster.get_hitbox());
+        // creating game objects
+        game_size_data game_size(window_height, window_width, room_width, room_height);
+        game_timing_data game_timing(frame_rate);
 
-        monster.set_zoom_level(game_size.get_zoom_level());
-        monster.update(game_timing.get_delta_time(), room, player);
-        monster.check_hitbox_collision(player.get_hitbox());
-
-        // rebuilding the room to update the zoom level
+        // building the room object
+        room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
         room.set_zoom_level(game_size.get_zoom_level());
         room.build_room();
+        const color *color_array = room.get_color_pattern();
 
-        // setting the camera position to the player's center position
-        coordinate center_pos = game_size.get_camera_position(player.get_center_position());
-        set_camera_position({center_pos.x, center_pos.y});
+        double tile_size = room.get_zoomed_tile_size();
 
-        // drawing the room, npcs, player, and monster
-        room.draw();
+        // creating player and npc objects
+        double player_model_size = tile_size;
+        player_data player(tile_size, player_model_size, room.get_spawn_coords(), "player_idle");
+
+        double npc_model_size = tile_size;
+        vector<npc_data *> npcs(npc_count); // keeping all the npcs in the room in a vector (there are multiple npcs in the room)
         for (int i = 0; i < npc_count; i++)
         {
-            // only draw the npc if it is on the screen
-            if (rect_on_screen(npcs[i]->get_hurtbox()))
+            npcs[i] = new npc_data(tile_size, npc_model_size, room, "npc_idle");
+            npcs[i]->set_zoom_level(game_size.get_zoom_level());
+            npcs[i]->update(game_timing.get_delta_time(), room);
+        }
+
+        // creating monster object
+        double monster_model_size = tile_size * 2.4;
+        monster_data monster(tile_size, npc_model_size, monster_model_size, room, "npc_idle", "monster");
+        monster.set_zoom_level(game_size.get_zoom_level());
+        monster.update(game_timing.get_delta_time(), room, player);
+
+        // setting up easing functions and objects to be used
+        ease_data highlight_ease;
+        highlight_ease.ease_func = &ease_out_quint;
+        highlight_ease.time_to_ease = 10000;
+
+        ease_data time_rate_ease;
+        time_rate_ease.ease_func = &ease_out_quint;
+
+        ease_data zoom_level_ease;
+        zoom_level_ease.ease_func = &ease_out_quint;
+
+        ease_data filter_ease;
+        filter_ease.ease_func = &ease_out_quint;
+
+        ease_data timer_warning_ease;
+        timer_warning_ease.ease_func = &ease_out_quint;
+        timer_warning_ease.time_to_release = 1000;
+        timer_warning_ease.value = 0.7;
+
+        // initial, unupdated color of room, used to show timer countdown warnings
+        color initial_color_array[3] = {color_array[0], color_array[1], color_array[2]};
+
+        // game loop
+        while (!quit_requested())
+        {
+            // setting game timing
+            game_timing.update_timing();
+            // skip frame if no time has passed (fast computers can have time difference of 0)
+            if (game_timing.get_time_difference() == 0)
             {
-                npcs[i]->draw();
+                continue;
             }
-        }
-        // only draw the player if it is on the screen
-        if (rect_on_screen(player.get_hurtbox()))
-        {
-            player.draw();
-        }
-        // only draw the monster if it is on the screen
-        if (rect_on_screen(monster.get_hurtbox()))
-        {
-            monster.draw(highlight_ease, game_timing.get_time_difference());
+
+            // clear screen
+            clear_screen(color_array[2]);
+
+            // updating player, npcs, and monster by calling their update functions, setting their zoom level, and checking for hitbox collision
+            for (int i = 0; i < npc_count; i++)
+            {
+                if (npcs[i]->get_health() <= 0)
+                {
+                    timer_over = true;
+                    break;
+                }
+
+                npcs[i]->set_zoom_level(game_size.get_zoom_level());
+                npcs[i]->update(game_timing.get_delta_time(), room);
+                npcs[i]->check_hitbox_collision(player.get_hitbox());
+            }
+
+            player.set_zoom_level(game_size.get_zoom_level());
+            player.update(game_timing.get_delta_time());
+            player.check_hitbox_collision(monster.get_hitbox());
+
+            monster.set_zoom_level(game_size.get_zoom_level());
+            monster.update(game_timing.get_delta_time(), room, player);
+            monster.check_hitbox_collision(player.get_hitbox());
+
+            // rebuilding the room to update the zoom level
+            room.set_zoom_level(game_size.get_zoom_level());
+            room.build_room();
+
+            // setting the camera position to the player's center position
+            coordinate center_pos = game_size.get_camera_position(player.get_center_position());
+            set_camera_position({center_pos.x, center_pos.y});
+
+            // drawing the room, npcs, player, and monster
+            room.draw();
+            for (int i = 0; i < npc_count; i++)
+            {
+                // only draw the npc if it is on the screen
+                if (rect_on_screen(npcs[i]->get_hurtbox()))
+                {
+                    npcs[i]->draw();
+                }
+            }
+            // only draw the player if it is on the screen
+            if (rect_on_screen(player.get_hurtbox()))
+            {
+                player.draw();
+            }
+            // only draw the monster if it is on the screen
+            if (rect_on_screen(monster.get_hurtbox()))
+            {
+                monster.draw(highlight_ease, game_timing.get_time_difference());
+            }
+
+            // control functions for player and ability (focusing)
+            control_player(player, game_timing, room);
+            control_ability(game_timing, game_size, monster, time_rate_ease, zoom_level_ease, filter_ease);
+
+            // drawing the timer countdown on the screen
+            draw_timer(timer_countdown(time_limit, timer_over) / 1000, window_width, window_height);
+            // creating visual warnings as timer goes down
+            count_down_warning(timer_countdown(time_limit, timer_over), 30000, room, initial_color_array, timer_warning_ease, game_timing.get_time_difference());
+            // if one of the npcs is dead, the timer will run down to 0 instantly
+
+            if (timer_countdown(time_limit, timer_over) <= 0)
+            {
+                timer_out(npcs, monster);
+            }
+
+            if (player.get_health() <= 0)
+            {
+                game_lost = true;
+                break;
+            }
+            if (monster.get_health() <= 0)
+            {
+                game_won = true;
+                break;
+            }
+
+            // limit refresh screen for frame rate
+            if (game_timing.update_frame())
+            {
+                refresh_screen();
+            }
+
+            process_events();
         }
 
-        // drawing the time left on the screen (timer countdown)
-        draw_text(std::to_string(timer_countdown(time_limit)), color_green(), get_system_font(), window_height * 0.1, camera_position().x + ((double)window_width / 2.0), camera_position().y + ((double)window_height * 0.1));
-
-        // control functions for player and ability (focusing)
-        control_player(player, game_timing, room);
-        control_ability(game_timing, game_size, monster, time_rate_ease, zoom_level_ease, filter_ease);
-
-        // FIXME: delete test code
-        if (key_down(R_KEY))
+        for (int i = 0; i < npc_count; i++)
         {
-            monster.set_expose_self(true);
+            delete npcs[i];
         }
-        else
+        npcs.clear();
+
+        if (game_won)
         {
-            monster.set_expose_self(false);
+            game_level++;
         }
 
-        // FIXME: delete test code
-        fill_rectangle(rgba_color(139.0, 0.0, 0.0, 0.15), camera_position().x, camera_position().y, game_size.get_screen_width(), game_size.get_screen_height());
-
-        // limit refresh screen for frame rate
-        if (game_timing.update_frame())
+        if (game_lost)
         {
-            refresh_screen();
+            game_level = 1;
+        }
+
+        draw_end_screen(game_won, game_lost, window_width, window_height);
+        refresh_screen();
+
+        while (!quit_requested() && !key_typed(ESCAPE_KEY))
+        {
+            process_events();
         }
 
         process_events();
+        reset_timer("Main timer");
     }
-
+    // TODO: set random walls
     return 0;
 }
