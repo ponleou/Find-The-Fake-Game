@@ -9,47 +9,84 @@ double ease_out_quint(double x)
     return 1 - std::pow(1 - x, 5);
 }
 
+// use to increase values by an ease function,
 struct ease_data
 {
-    double increase;
-    double change_by;
-    double initial_value;
-    double value;
+private:
+    double initial_value; // initial value of the variable (only used for ease_value without variable pointer)
+    double change_by;     // the amount the value needs to be change from initial to end
+    double increase;      // the amount the value has been increased by (x value of the ease function)
 
+    double calculate_ease(double time, double delta_time)
+    {
+        int max_increase = 1; // increase should only go from 0 to 1
+
+        double increment_rate = max_increase / (time / delta_time);
+        increase += increment_rate; // incrementing the increase by the rate
+
+        if (increase >= max_increase)
+        {
+            increase = max_increase; // making sure increase does not go over 1
+        }
+
+        return ease_func(increase); // returning the ease function of the increase
+    }
+
+public:
+    double value; // the value that is being eased (only used for ease_value without variable pointer) default is 0
+    // should be changed if the value to start increasing is not 0
+    // acts as a pointer to the variable that is being eased (syncs the value with the variable)
+
+    double time_to_ease;         // the time it takes for the value to ease to the end value (used when change_by is positive)
+    double time_to_release;      // the time it takes for the value to release to the initial value (used when change_by is negative)
+    double (*ease_func)(double); // the ease function to be used
+
+    // Constructor
     ease_data()
     {
         increase = 0;
         change_by = 0;
         initial_value = 0;
-        value = 0;
+        value = 0;             // default value is 0
+        time_to_ease = 800;    // default time to ease is 800 ms
+        time_to_release = 800; // default time to release is 800 ms
     }
 
-    void ease_value(double *value, double to_value, double (*ease_func)(double), double increment_rate)
+    // eases the value of the variable to the to_value directly (using pointers)
+    void ease_value(double *variable, double to_value, double delta_time)
     {
-        if (this->change_by != to_value - *value)
+        double time;
+
+        if (this->change_by != to_value - *variable)
         {
             increase = 0;
         }
 
         if (increase == 0)
         {
-            initial_value = *value;
-            change_by = to_value - *value;
+            initial_value = *variable;
+            change_by = to_value - *variable;
         }
 
-        increase += increment_rate;
-
-        if (increase >= 1)
+        if (change_by < 0)
         {
-            increase = 1;
+            time = time_to_release;
+        }
+        else if (change_by > 0)
+        {
+            time = time_to_ease;
         }
 
-        double eased = ease_func(increase);
-        *value = initial_value + eased * change_by;
+        double eased = calculate_ease(time, delta_time);
+
+        *variable = initial_value + eased * change_by;
     }
 
-    double ease_value(double to_value, double (*ease_func)(double), double increment_rate)
+    // returns the eased value of the initial value to the to_value
+    double ease_value(double to_value, double delta_time)
     {
+        double time;
+
         if (this->change_by != to_value - value)
         {
             increase = 0;
@@ -61,14 +98,17 @@ struct ease_data
             change_by = to_value - value;
         }
 
-        increase += increment_rate;
-
-        if (increase >= 1)
+        if (change_by < 0)
         {
-            increase = 1;
+            time = time_to_release;
+        }
+        else if (change_by > 0)
+        {
+            time = time_to_ease;
         }
 
-        double eased = ease_func(increase);
+        double eased = calculate_ease(time, delta_time);
+
         value = initial_value + eased * change_by;
 
         return value;
@@ -117,8 +157,6 @@ private:
     int room_height;   // the number of tiles in the room on the y axis
     double zoom_level; // the zoom level of the game or screen
 
-    ease_data ease_zoom_level;
-
 public:
     // Constructor
     game_size_data(int screen_height, int screen_width, int room_width, int room_height)
@@ -136,6 +174,11 @@ public:
     int get_screen_height() const
     {
         return screen_height;
+    }
+    // screen width is calculated using the screen height and the room width and height
+    int get_screen_width() const
+    {
+        return screen_width;
     }
 
     int get_room_width() const
@@ -159,15 +202,9 @@ public:
         this->zoom_level = zoom_level;
     }
 
-    void set_zoom_level(double zoom_level, double (*ease_func)(double), double increment_rate)
+    void set_zoom_level(double zoom_level, ease_data &ease, double delta_time)
     {
-        ease_zoom_level.ease_value(&this->zoom_level, zoom_level, ease_func, increment_rate);
-    }
-
-    // screen width is calculated using the screen height and the room width and height
-    int get_screen_width() const
-    {
-        return screen_width;
+        ease.ease_value(&this->zoom_level, zoom_level, delta_time);
     }
 
     // get the camera position that would keep the parameter coorindate in the center of the screen
@@ -182,12 +219,11 @@ class game_timing_data
 {
 private:
     double delta_time;             // time between the last frame and the current frame
-    double last_update_time;       // the time of the last frame
     double time_rate;              // how many seconds the game should load in one second
+    double time_difference;        // delta time wihtout the time rate
+    double last_update_time;       // the time of the last frame
     int frame_rate;                // the frame rate of the game
     double last_frame_update_time; // the time of the last frame update
-
-    ease_data ease_time_rate;
 
     // get the time it takes for each frame to be displayed to fit frame rate
     double get_frame_delay() const
@@ -199,25 +235,31 @@ public:
     // Constructor
     game_timing_data()
     {
-        last_update_time = 0;
+        delta_time = 0;
         time_rate = 1;
+        time_difference = 0;
+        last_update_time = 0;
         frame_rate = 60;
+        last_frame_update_time = 0;
     }
 
     game_timing_data(int frame_rate)
     {
-        last_update_time = 0;
+        delta_time = 0;
         time_rate = 1;
+        time_difference = 0;
+        last_update_time = 0;
+        last_frame_update_time = 0;
         this->frame_rate = frame_rate;
     }
 
     // must be ran inside a game loop in order to update the delta time
     void update_timing()
     {
-        delta_time = (double)current_ticks() - (double)last_update_time; // getting delta_time
-        last_update_time = (double)current_ticks();                      // setting the last update time
-        last_frame_update_time += delta_time;                            // adding the delta time to the last frame update time
-        delta_time *= time_rate;                                         // changing the delta time according to the time rate
+        time_difference = (double)current_ticks() - (double)last_update_time; // getting delta_time
+        last_update_time = (double)current_ticks();                           // setting the last update time
+        last_frame_update_time += time_difference;                            // adding the delta time to the last frame update time
+        delta_time = time_difference * time_rate;                             // changing the delta time according to the time rate
     }
 
     // setters and getters
@@ -226,15 +268,20 @@ public:
         return delta_time;
     }
 
+    double get_time_difference() const
+    {
+        return time_difference;
+    }
+
     // set time rate, changes the time rate of the delta time
     void set_time_rate(double rate)
     {
         time_rate = rate;
     }
 
-    void set_time_rate(double rate, double (*ease_func)(double), double increment_rate)
+    void set_time_rate(double time_rate, ease_data &ease, double delta_time)
     {
-        ease_time_rate.ease_value(&this->time_rate, rate, ease_func, increment_rate);
+        ease.ease_value(&this->time_rate, time_rate, delta_time);
     }
 
     // set frame rate, changes the frame rate of the game, tells when the game should update the frame (calling screen_refresh)
@@ -407,7 +454,6 @@ private:
     }
 
 public:
-    // FIXME: each tile should also record its pixel coordinate // FIXME: wait why?
     // Constructor
     room_data(int floor_width, int floor_height, int screen_width, int screen_height)
     {
@@ -459,12 +505,6 @@ public:
                 fill_rectangle(tile.tile_color, tile.tile);
             }
         }
-
-        // FIXME: hide walls
-        for (int i = 0; i < walls_vector.size(); i++)
-        {
-            draw_rectangle(color_red(), walls_vector[i]);
-        }
     }
 
     // check if a tile coords is passable
@@ -504,6 +544,11 @@ public:
         return tile_size;
     }
 
+    const color *get_color_pattern() const
+    {
+        return color_pattern;
+    }
+
     // sets the wall of the room, using a start and end tile coordinate
     //(the wall is the rectangle from the top left corner of start tile to the bottom right corner of end tile)
     void set_wall(const coordinate &start_tile, const coordinate &end_tile)
@@ -514,6 +559,13 @@ public:
         coordinate wall_coords_end = end_tile;
         vector<coordinate> wall_coords_vector = {wall_coords_start, wall_coords_end};
         walls_coords_vector.push_back(wall_coords_vector);
+    }
+
+    void set_color_pattern(const color &floor_color_1, const color &floor_color_2, const color &wall_color)
+    {
+        color_pattern[0] = floor_color_1;
+        color_pattern[1] = floor_color_2;
+        color_pattern[2] = wall_color;
     }
 
     void set_zoom_level(double zoom_level)
@@ -536,7 +588,8 @@ private:
     double zoom_level;           // zoom level of the screen to adjust the size of the model and posiion of the model
     double zoomed_model_scaling; // model scaling after zooming
 
-    coordinate position; // position of the character in correlation to the screen (non-zoomed)
+    coordinate position;        // position of the character in correlation to the screen (non-zoomed)
+    coordinate zoomed_position; // position of the character in correlation to the room (after zooming), only used for drawing
 
     void update_zoomed_position()
     {
@@ -544,8 +597,7 @@ private:
     }
 
 protected:
-    coordinate zoomed_position; // position of the character in correlation to the room (after zooming), only used for drawing
-
+    // constructor
     character_data(int health, double speed, const bitmap &model, bool model_facing_right, double model_size, const coordinate &spawn_coords)
     {
         // setting player
@@ -581,7 +633,6 @@ protected:
     }
 
     // getters and setters
-
     // set the size of the model (scaling of the model)
     void set_model_size(double model_size)
     {
@@ -597,6 +648,11 @@ protected:
         {
             model_scaling = model_size / model_height;
         }
+    }
+
+    void set_zoomed_position(const coordinate &zoomed_position)
+    {
+        this->zoomed_position = zoomed_position;
     }
 
     // return the model (bitmap) of the character
@@ -617,11 +673,6 @@ protected:
         return zoomed_model_scaling;
     }
 
-    const rectangle &get_hurtbox() const
-    {
-        return hurtbox;
-    }
-
     double get_zoom_level() const
     {
         return zoom_level;
@@ -630,6 +681,11 @@ protected:
     void set_position(const coordinate &position)
     {
         this->position = position;
+    }
+
+    void set_health(int health)
+    {
+        this->health = health;
     }
 
     // get position of the character in colleration to the room
@@ -642,12 +698,18 @@ public:
     // update the character's position and hurtbox, should always be ran inside the game loop
     void update()
     {
+        // no need to update if the character is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
         update_zoomed_position();
         update_zoomed_model_scaling();
         update_hurtbox();
     }
 
-    // move the character in a direction by a distance (overriden by npc_data for better wall walking collision)
+    // move the character in a direction by a distance
     void move(vector_2d &direction, double distance, const room_data &room)
     {
         if (direction.x != 0 || direction.y != 0)
@@ -657,7 +719,7 @@ public:
 
         vector_2d movement = vector_multiply(direction, distance);
         coordinate new_position = {position.x + movement.x, position.y + movement.y};
-        set_position(new_position);
+        // set_position(new_position);
 
         // array with all the walls in the room
         const vector<rectangle> &walls_vector = room.get_walls_vector();
@@ -678,15 +740,13 @@ public:
                     if (intersection(hurtbox, walls_vector[i]).height == 0)
                     {
                         // if no collision, then move the player by y + collision_box.height
-                        new_position = {position.x, (position.y + collision_box.height)};
-                        break;
+                        new_position = {new_position.x, (new_position.y + collision_box.height)};
                     }
                     // hurtbox_copy.y = new_position.y - collision_box.height;
                     else
                     {
                         // if collision, then move the player by y - collision_box.height
-                        new_position = {position.x, (position.y - collision_box.height)};
-                        break;
+                        new_position = {new_position.x, (new_position.y - collision_box.height)};
                     }
                 }
 
@@ -697,15 +757,13 @@ public:
                     if (intersection(hurtbox, walls_vector[i]).width != 0)
                     {
                         // if no collision, then move the player by x + collision_box.width
-                        new_position = {(position.x - collision_box.width), position.y};
-                        break;
+                        new_position = {(new_position.x - collision_box.width), new_position.y};
                     }
                     // hurtbox_copy.x = new_position.x - collision_box.width;
                     else
                     {
                         // if collision, then move the player by x - collision_box.width
-                        new_position = {(position.x + collision_box.width), position.y};
-                        break;
+                        new_position = {(new_position.x + collision_box.width), new_position.y};
                     }
                 }
             }
@@ -715,8 +773,13 @@ public:
     }
 
     // draw the character onto the screen
-    void draw() const
+    virtual void draw() const
     {
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
         double model_width = bitmap_width(get_model());
         double model_height = bitmap_height(get_model());
         double zoomed_model_scaling = get_zoomed_model_scaling();
@@ -738,14 +801,30 @@ public:
         draw_rectangle(color_red(), get_hurtbox().x, get_hurtbox().y, get_hurtbox().width, get_hurtbox().height); // FIXME: hide hurtbox
     }
 
+    // check if the character's hurtbox is colliding with a hitbox
+    void check_hitbox_collision(const rectangle &hitbox)
+    {
+        rectangle collision_box = intersection(hurtbox, hitbox);
+        if (collision_box.width != 0 && collision_box.height != 0)
+        {
+            // if there is a collision, decrease the health of the character
+            health--;
+        }
+    }
+    // getters and setters
+    double get_speed() const
+    {
+        return speed;
+    }
+
     int get_health() const
     {
         return health;
     }
 
-    double get_speed() const
+    const coordinate &get_position() const
     {
-        return speed;
+        return position;
     }
 
     // set the direction the character is facing (true is right, false is left)
@@ -754,9 +833,22 @@ public:
         model_facing_right = facing_right;
     }
 
+    // set character's zoom level (to zoom with the screen)
     void set_zoom_level(double zoom_level)
     {
         this->zoom_level = zoom_level;
+    }
+
+    // get the player's center position on the screen
+    coordinate get_center_position() const
+    {
+        return {zoomed_position.x + (bitmap_width(get_model()) * get_zoomed_model_scaling()) / 2, zoomed_position.y + (bitmap_height(get_model()) * get_zoomed_model_scaling()) / 2};
+    }
+
+    // get the hurtbox of the character
+    const rectangle &get_hurtbox() const
+    {
+        return hurtbox;
     }
 };
 
@@ -779,12 +871,14 @@ private:
         min_coords = min_coords.pixel_to_tile(room.get_zoomed_tile_size());
         max_coords = max_coords.pixel_to_tile(room.get_zoomed_tile_size());
 
+        coordinate rand_position;
+
         do
         {
             // generating a random position for the npc to move to converting to tile coordinates
-            new_position = random_coordinate(min_coords, max_coords);
+            rand_position = random_coordinate(min_coords, max_coords);
             // checking if the tile is within the room
-            if (new_position.x < 0 || new_position.x >= room.get_size_x() || new_position.y < 0 || new_position.y >= room.get_size_y())
+            if (rand_position.x < 0 || rand_position.x >= room.get_size_x() || rand_position.y < 0 || rand_position.y >= room.get_size_y())
             {
                 continue;
             }
@@ -798,7 +892,7 @@ private:
             {
                 for (int j = 0; j < player_tile_width; j++)
                 {
-                    player_tiles.push_back({new_position.x + j, new_position.y + i});
+                    player_tiles.push_back({rand_position.x + j, rand_position.y + i});
                 }
             }
 
@@ -820,6 +914,8 @@ private:
                 break;
             }
         } while (true);
+
+        set_new_position(rand_position);
     }
 
     // move the npc to a random position within a range automatically
@@ -851,8 +947,8 @@ private:
     {
         // calculate the direction and distance the npc should move
         vector_2d direction = {0, 0};
-        direction.x = zoomed_new_position.x - zoomed_position.x;
-        direction.y = zoomed_new_position.y - zoomed_position.y;
+        direction.x = zoomed_new_position.x - get_zoomed_position().x;
+        direction.y = zoomed_new_position.y - get_zoomed_position().y;
 
         // set the direction the npc is facing
         if (direction.x > 0)
@@ -870,19 +966,28 @@ private:
         move(direction, distance, room);
     }
 
+    // update values that are affected by zoom level
     void update_zoomed_auto_move_max_distance()
     {
         zoomed_auto_move_max_distance = auto_move_max_distance * get_zoom_level();
     }
 
+    // update values that are affected by zoom level
     void update_zoomed_new_position()
     {
         zoomed_new_position = {new_position.x * get_zoom_level(), new_position.y * get_zoom_level()};
     }
 
+    // setting new position of the npc (that it will auto move to)
+    void set_new_position(const coordinate &new_position)
+    {
+        this->new_position = new_position;
+    }
+
 public:
-    npc_data(double tile_size, double model_size, const room_data &room)
-        : character_data(1, 4 * tile_size / 1000, load_bitmap("npc_idle", "./image_data/npc/npc_idle.png"), true, model_size, {0, 0})
+    // Constructor
+    npc_data(double tile_size, double model_size, const room_data &room, string bitmap_name)
+        : character_data(1, 4 * tile_size / 1000, bitmap_named(bitmap_name), true, model_size, {0, 0})
     {
         auto_move_max_distance = 10 * tile_size;
         new_position_cooldown = 5000; // ms
@@ -902,65 +1007,89 @@ public:
     // update the npc's position and hurtbox, should always be ran inside the game loop
     void update(double delta_time, const room_data &room)
     {
+        // no need to update if the npc is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
         update_zoomed_auto_move_max_distance();
         update_zoomed_new_position();
         auto_set_new_position(delta_time, room);
-        draw_rectangle(color_red(), zoomed_new_position.x, zoomed_new_position.y, room.get_zoomed_tile_size(), room.get_zoomed_tile_size()); // FIXME: hide new position
 
         auto_move(delta_time, room);
 
         // calls update from character_data base class, updates hitbox and model scaling
         character_data::update();
     }
+
+    // friends with monster_data to allow monster_data to access npc_data's private members (used as disguise)
+    friend class monster_data;
 };
 
 enum sword_phase
 {
     SWORD_DRAW = 0,
     SWORD_SWING,
+    NO_SWORD
 };
 
 // sword info stuct
 struct sword_data
 {
-    bitmap sword_draw_model;
-    bitmap sword_swing_model;
-    double model_scaling;
-    coordinate position;
-    sword_phase phase;
+    bitmap sword_draw_model;  // bitmap of the sword when the player is drawing the sword
+    bitmap sword_swing_model; // bitmap of the sword when the player is swinging the sword
+    double model_scaling;     // scaling of the sword model
+    coordinate position;      // position of the sword
+    sword_phase phase;        // the phase of the sword (drawing, swinging, or no sword) (used to determine which bitmap to draw)
 };
 
 // player info struct, players can attack
 class player_data : public character_data
 {
 private:
-    int attack_speed; // ms
-    bool is_attacking;
-    bool create_hitbox;
-    rectangle hitbox;
+    int attack_speed;        // ms
+    bool is_attacking;       // if true, the player is attacking, used to check with timing and drawing
+    bool create_hitbox;      // if true, the player's sword will have a hitbox
+    rectangle hitbox;        // the hitbox of the sword, the hitbox is active when the player is attacking
     int hitbox_lasting_time; // ms
-    double attack_cooldown;
-    bool can_attack;
+    double attack_cooldown;  // ms
+    bool can_attack;         // if true, the player can attack, if false, the player is in cooldown
 
     sword_data sword;
-    double sword_zoomed_model_scaling;
+    double sword_zoomed_model_scaling; // scaling of the sword when zoomed, derived from the sword's model scaling
 
     // main function for attacking, controls the attacking animation, and the time the hitbox is active (according to attack_speed)
     void attacking()
     {
+        // if the player is not attacking, the sword phase is set to no sword
+        if (!is_attacking)
+        {
+            sword.phase = NO_SWORD; // doesnt draw the sword on the screen if the phase is no sword
+            return;
+        }
+
+        // NOTE: sword animation and progress takes 2 * attack_speed
+
+        // for the start of the animaion, the player is drawing the sword for attack_speed
         if (attack_cooldown < attack_speed)
         {
             sword.phase = SWORD_DRAW;
-            draw_sword();
+            return;
         }
-        else if (attack_cooldown < attack_speed * 1.5)
+
+        // after attakc_speed time, the player is swinging the sword for attack_speed * 0.5
+        if (attack_cooldown < attack_speed * 1.5)
         {
             sword.phase = SWORD_SWING;
+
+            // create hitbox when the player is swinging the sword, only for hitbox_lasting_time
             if (attack_cooldown < attack_speed + hitbox_lasting_time)
                 create_hitbox = true;
             else
                 create_hitbox = false;
-            draw_sword();
+
+            return;
         }
     }
 
@@ -1004,11 +1133,12 @@ private:
 
         // align the sword's hitbox with the player's direction
         if (get_is_facing_right())
-            hitbox = {zoomed_position.x + (player_model_width * get_zoomed_model_scaling()), zoomed_position.y, hitbox_size_x, hitbox_size_y};
+            hitbox = {get_zoomed_position().x + (player_model_width * get_zoomed_model_scaling()), get_zoomed_position().y, hitbox_size_x, hitbox_size_y};
         else
-            hitbox = {zoomed_position.x - hitbox_size_x, zoomed_position.y, hitbox_size_x, hitbox_size_y};
+            hitbox = {get_zoomed_position().x - hitbox_size_x, get_zoomed_position().y, hitbox_size_x, hitbox_size_y};
     }
 
+    // update the sword's zoom to fit with the zoom_level
     void update_sword_zoomed_model_scaling()
     {
         sword_zoomed_model_scaling = sword.model_scaling * get_zoom_level();
@@ -1016,8 +1146,8 @@ private:
 
 public:
     // Constructor
-    player_data(double tile_size, double model_size, const coordinate &spawn_coords)
-        : character_data(1, 5.0 * tile_size / 1000, load_bitmap("player_idle", "./image_data/player/player_idle.png"), true, model_size, spawn_coords)
+    player_data(double tile_size, double model_size, const coordinate &spawn_coords, string bitmap_name)
+        : character_data(1, 5.0 * tile_size / 1000, bitmap_named(bitmap_name), true, model_size, spawn_coords)
     {
         attack_speed = 1000;       // ms
         hitbox_lasting_time = 100; // ms
@@ -1031,8 +1161,8 @@ public:
         double model_height = bitmap_height(get_model());
 
         // setting sword struct
-        sword.sword_draw_model = load_bitmap("Sword draw", "./image_data/sword/sword_1.png");
-        sword.sword_swing_model = load_bitmap("Sword attack", "./image_data/sword/sword_2.png");
+        sword.sword_draw_model = bitmap_named("sword_draw");
+        sword.sword_swing_model = bitmap_named("sword_swing");
 
         // both sword bitmap have the same size
         double sword_model_width = bitmap_width(sword.sword_draw_model);
@@ -1057,8 +1187,8 @@ public:
         update_sword();
     }
 
-    player_data(double tile_size, double model_size)
-        : player_data(tile_size, model_size, {0, 0}) {}
+    player_data(double tile_size, double model_size, string bitmap_name)
+        : player_data(tile_size, model_size, {0, 0}, bitmap_name) {}
 
     // attack function to call the player to attack (only if the player can attack)
     void attack()
@@ -1084,35 +1214,42 @@ public:
         // making the sword align with the player
         if (get_is_facing_right())
         {
-            sword.position.x = zoomed_position.x + (player_model_width * model_scaling);
-            sword.position.y = zoomed_position.y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
+            sword.position.x = get_zoomed_position().x + (player_model_width * model_scaling);
+            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
         }
         else
         {
-            sword.position.x = zoomed_position.x - (sword_model_width * sword_zoomed_model_scaling);
-            sword.position.y = zoomed_position.y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
+            sword.position.x = get_zoomed_position().x - (sword_model_width * sword_zoomed_model_scaling);
+            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
         }
     }
 
     // must be ran inside game loop, and get delta_time from game_timing_data
     void update(double delta_time)
     {
+        // no need to update if the player is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
         character_data::update();
         update_hitbox();
         update_sword();
 
         if (is_attacking)
         {
+            // if the player is attacking, update the attack cooldown and the attack state
             update_attack_cooldown(delta_time);
+            // continue the attacking process
             attacking();
         }
-
-        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height); // FIXME: hide hitbox
     }
 
-    double get_attack_cool_down() const
+    // get the player's sword hitbox
+    const rectangle &get_hitbox() const
     {
-        return attack_cooldown;
+        return hitbox;
     }
 
     // draw player's sword onto screen
@@ -1133,6 +1270,7 @@ public:
 
         double model_scaling = get_zoomed_model_scaling();
 
+        // flip when facing opposite direction
         if (get_is_facing_right())
         {
             if (model == SWORD_DRAW)
@@ -1149,10 +1287,222 @@ public:
         }
     }
 
-    // get the player's center position on the screen
-    coordinate get_center_position() const
+    void draw() const
     {
-        return {zoomed_position.x + (bitmap_width(get_model()) * get_zoomed_model_scaling()) / 2, zoomed_position.y + (bitmap_height(get_model()) * get_zoomed_model_scaling()) / 2};
+
+        // no need to draw if the player is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
+        character_data::draw();
+        draw_sword();
+        draw_rectangle(color_red(), hitbox.x, hitbox.y, hitbox.width, hitbox.height); // FIXME: hide hitbox
+    }
+};
+
+// monster class, inherits from character_data, can disguise as npc (friendship with npc_data)
+class monster_data : public character_data
+{
+private:
+    // outline of the monster when disguised (or highlight)
+    bool show_outline;
+    ease_data ease_outline;
+
+    // if the monster is exposed, it will be drawn, if not, the disguise will be drawn
+    bool expose_self;
+
+    // the range at which the monster will detect the player
+    double player_detection_range;
+    bool escaped_player; // if the monster has escaped the player out of detection range, it is true, if not, it is false
+
+    npc_data *disguise; // the npc object disguise of the monster
+    rectangle hitbox;   // the hitbox of the monster, the hitbox is active when the monster is exposed
+
+    // escape the player by moving away from the player
+    void escape_player(const player_data &player)
+    {
+        // getting direction between the player and the monster
+        vector_2d direction = {0, 0};
+        direction.x = get_position().x - player.get_position().x;
+        direction.y = get_position().y - player.get_position().y;
+
+        // the distance between the player and the monster, if the distance is greater than the player_detection_range, the monster has escaped the player
+        double distance = vector_magnitude(direction);
+        if (distance > player_detection_range)
+        {
+            if (!escaped_player)
+            {
+                // this is to reset the disguise's position to activate the new position for npc object to automatically move to
+                // in the NPC class, if the new position is the same as the current position, the npc will get a random new position and move to it
+                disguise->set_new_position(get_position());
+            }
+
+            escaped_player = true;
+            return;
+        }
+
+        // if the monster has not escapted the player, it will move away from the player
+        escaped_player = false;
+        if (direction.x != 0 || direction.y != 0)
+        {
+            // convert to unit vector
+            direction = unit_vector(direction);
+        }
+
+        // monster's disguise will move away from the player at the shortest distance
+        disguise->set_new_position({get_position().x + direction.x, get_position().y + direction.y});
+    }
+
+    // chase the player by moving directly towards the player, used when the monster is exposed
+    void chase_player(int delta_time, const player_data &player, const room_data &room)
+    {
+        vector_2d direction = {0, 0};
+        direction.x = player.get_center_position().x - get_center_position().x;
+        direction.y = player.get_center_position().y - get_center_position().y;
+
+        // set the direction the monster is facing, for drawing
+        if (direction.x > 0)
+        {
+            set_is_facing_right(true);
+        }
+        else
+        {
+            set_is_facing_right(false);
+        }
+
+        // the distance the monster will move according to delta_time
+        double distance = get_speed() * (double)delta_time;
+
+        move(direction, distance, room);
+    }
+
+    // update the monster's hitbox
+    void update_hitbox()
+    {
+        // the monster's hitbox the same as its hurtbox
+        hitbox = get_hurtbox();
+
+        // if the monster is not exposed, the hitbox is 0
+        if (!expose_self)
+        {
+            hitbox.height = 0;
+            hitbox.width = 0;
+        }
+    }
+
+public:
+    // Constructor
+    monster_data(double tile_size, double model_disguise_size, double model_size, const room_data &room, string bitmap_disguise_name, string bitmap_name)
+        : character_data(1, 10 * tile_size / 1000, bitmap_named(bitmap_name), true, model_size, {0, 0})
+    {
+        show_outline = false;
+        expose_self = false;
+
+        // creating an npc object for the monster to disguise as
+        disguise = new npc_data(tile_size, model_disguise_size, room, bitmap_disguise_name);
+        player_detection_range = 5 * tile_size;
+        escaped_player = true;
+        update_hitbox();
+    }
+
+    // set zoom level for itself and the disguise object
+    void set_zoom_level(double zoom_level)
+    {
+        character_data::set_zoom_level(zoom_level);
+        disguise->set_zoom_level(zoom_level);
+    }
+
+    // update itself and the disguise object, must be called in the game loop
+    void update(double delta_time, const room_data &room, const player_data &player)
+    {
+
+        // no need to update if the monster is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
+        disguise->update(delta_time, room);
+        character_data::update();
+        update_hitbox();
+
+        // syncronize stats of the monster and the disguise
+        if (!expose_self)
+        {
+            // if the monster is not exposed, the monster will take the disguise's position and health
+            set_position(disguise->get_position());
+            set_health(disguise->get_health());
+            escape_player(player);
+        }
+        else
+        {
+            // if the monster is exposed, the disguised will take the monster's position and health
+            disguise->set_position(get_position());
+            disguise->set_health(get_health());
+            chase_player(delta_time, player, room);
+        }
+    }
+
+    // draw the monster onto the screen, with easing for the outline
+    void draw(ease_data &ease, double delta_time)
+    {
+        // no need to draw if the monster is dead
+        if (get_health() <= 0)
+        {
+            return;
+        }
+
+        if (expose_self)
+        {
+            // if the monster is exposed, the monster will be drawn
+            character_data::draw();
+        }
+        else
+        {
+            // if the monster is not exposed, the disguise will be drawn
+            disguise->draw();
+
+            // drawing the outline of the disguise, if show_outline is true, the outline has an easing effect for its visibility
+            if (show_outline)
+            {
+                fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.5, delta_time)), disguise->get_hurtbox());
+            }
+            else
+            {
+                fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.0, delta_time)), disguise->get_hurtbox());
+            }
+        }
+    }
+
+    // check if the monster's hitbox is colliding with a hitbox
+    void check_hitbox_collision(const rectangle &hitbox)
+    {
+        if (expose_self)
+        {
+            character_data::check_hitbox_collision(hitbox);
+        }
+        else
+        {
+            disguise->check_hitbox_collision(hitbox);
+        }
+    }
+
+    // getters and setters
+    void set_show_outline(bool show_outline)
+    {
+        this->show_outline = show_outline;
+    }
+
+    void set_expose_self(bool expose_self)
+    {
+        this->expose_self = expose_self;
+    }
+
+    const rectangle &get_hitbox() const
+    {
+        return hitbox;
     }
 };
 
@@ -1197,111 +1547,231 @@ void player_attack(player_data &player)
     }
 }
 
+// function to draw the vignette on the screen
+void draw_vignette()
+{
+    point_2d camera_pos = camera_position();
+
+    double vignette_width = bitmap_width("vignette");
+    double vignette_height = bitmap_height("vignette");
+    double screen_x = screen_width();
+    double screen_y = screen_height();
+    double scale_x = screen_x / vignette_width;
+    double scale_y = screen_y / vignette_height;
+    draw_bitmap("vignette", camera_pos.x + (((vignette_width * scale_x) - vignette_width) / 2), camera_pos.y + (((vignette_height * scale_y) - vignette_height) / 2), (option_scale_bmp(scale_x, scale_y)));
+}
+
 // control to slow time, used for the focusing ability
-void slow_time(game_timing_data &game_timing, game_size_data &game_size, ease_data &ease)
+void control_ability(game_timing_data &game_timing, game_size_data &game_size, monster_data &monster, ease_data &time_rate_ease, ease_data &zoom_level_ease, ease_data &filter_ease)
 {
     point_2d camera_pos = camera_position();
 
     if (key_down(LEFT_SHIFT_KEY) || mouse_down(RIGHT_BUTTON))
     {
-        game_timing.set_time_rate(0.35, ease_out_quint, 0.01);
-        game_size.set_zoom_level(2, ease_out_quint, 0.01);
+        // slowing time and zooming in with easing
+        game_timing.set_time_rate(0.35, time_rate_ease, game_timing.get_time_difference());
+        game_size.set_zoom_level(2.5, zoom_level_ease, game_timing.get_time_difference());
 
         // drawing effects on screen
-
         // vignetted screen
-        double vignette_width = bitmap_width("vignette");
-        double vignette_height = bitmap_height("vignette");
-        double screen_x = screen_width();
-        double screen_y = screen_height();
-        double scale_x = screen_x / vignette_width;
-        double scale_y = screen_y / vignette_height;
-        draw_bitmap("vignette", camera_pos.x + (((vignette_width * scale_x) - vignette_width) / 2), camera_pos.y + (((vignette_height * scale_y) - vignette_height) / 2), (option_scale_bmp(scale_x, scale_y)));
+        draw_vignette();
         // color to desaturate the screen
-        fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.5, ease_out_quint, 0.01)), camera_pos.x, camera_pos.y, screen_width(), screen_height());
+        fill_rectangle(rgba_color(150.0, 170.0, 200.0, filter_ease.ease_value(0.5, game_timing.get_time_difference())), camera_pos.x, camera_pos.y, screen_width(), screen_height());
+        // outline or highlight the monster
+        monster.set_show_outline(true);
     }
     else
     {
-        game_timing.set_time_rate(1, ease_out_quint, 0.01);
-        game_size.set_zoom_level(1, ease_out_quint, 0.01);
+        // returning time and zoom to normal with easing
+        game_timing.set_time_rate(1, time_rate_ease, game_timing.get_time_difference());
+        game_size.set_zoom_level(1, zoom_level_ease, game_timing.get_time_difference());
 
         // removing destauration on screen
-        fill_rectangle(rgba_color(150.0, 170.0, 200.0, ease.ease_value(0.0, ease_out_quint, 0.01)), camera_pos.x, camera_pos.y, screen_width(), screen_height());
+        fill_rectangle(rgba_color(150.0, 170.0, 200.0, filter_ease.ease_value(0.0, game_timing.get_time_difference())), camera_pos.x, camera_pos.y, screen_width(), screen_height());
+        monster.set_show_outline(false);
     }
 }
 
 // function to control character, must be called in the game loop
-void control_player(player_data &player, game_timing_data &game_timing, game_size_data &game_size, const room_data &room, ease_data &ease)
+void control_player(player_data &player, game_timing_data &game_timing, const room_data &room)
 {
     move_player(player, game_timing.get_delta_time(), room);
     player_attack(player);
-    slow_time(game_timing, game_size, ease);
+}
+
+double timer_countdown(int time_limit)
+{
+    return ((double)time_limit - (double)current_ticks()) / 1000;
+}
+
+void count_down_warning(double time_left, int time_start_warning, room_data &room)
+{
+    color color_1 = rgb_color(139, 0, 0); // dark red, for new wall
+    color color_2 = rgb_color(0, 0, 0);
+    color color_3 = rgb_color(68, 68, 68);
+
+    if (time_left < time_start_warning)
+    {
+        const color *color_array = room.get_color_pattern();
+    }
 }
 
 int main()
 {
+    // load bitmaps
     load_bitmap("vignette", "./image_data/vignette/vignette.png");
-    ease_data ease;
+    load_bitmap("player_idle", "./image_data/player/player_idle.png");
+    load_bitmap("sword_draw", "./image_data/sword/sword_1.png");
+    load_bitmap("sword_swing", "./image_data/sword/sword_2.png");
+    load_bitmap("npc_idle", "./image_data/npc/npc_idle.png");
+    load_bitmap("monster", "./image_data/monster/monster.png");
 
-    game_size_data game_size(1080, 1920, 40, 25);
+    // set up game variables
+    int game_level = 0; // level starts from 0, will increment to 1 when the game starts
+    int window_width = 1920;
+    int window_height = 1080;
+    int frame_rate = 120;
+    int time_limit = 60000; // ms
 
-    open_window("Find The Fake", game_size.get_screen_width(), game_size.get_screen_height());
-
+    int room_width = rnd(20, 60);
+    int room_height = rnd(20, 60);
+    // time limit for the game, to find the monster
+    // number of npcs in the room
     int npc_count = 10;
 
-    game_timing_data game_timing(120);
+    // creating game objects
+    game_size_data game_size(window_height, window_width, room_width, room_height);
+    game_timing_data game_timing(frame_rate);
+
+    // open window
+    open_window("Find The Fake", game_size.get_screen_width(), game_size.get_screen_height());
+
+    // building the room object
     room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
-    double tile_size = room.get_zoomed_tile_size();
-
-    player_data player(tile_size, tile_size, room.get_spawn_coords());
-
-    coordinate min_tile_coords = {1, 1};
-    coordinate max_tile_coords = {(double)(game_size.get_room_width() - 2), (double)(game_size.get_room_height() - 2)};
-    // npc_data npc(get_tile_size(), coordinate().random_coordinate(max_tile_coords.tile_to_pixel()));
-
     room.set_wall({10, 10}, {20, 20}); // FIXME: delete test wall
     room.set_zoom_level(game_size.get_zoom_level());
     room.build_room();
 
-    vector<npc_data *> npcs(npc_count);
+    double tile_size = room.get_zoomed_tile_size();
+
+    // creating player and npc objects
+    double player_model_size = tile_size;
+    player_data player(tile_size, player_model_size, room.get_spawn_coords(), "player_idle");
+
+    double npc_model_size = tile_size;
+    vector<npc_data *> npcs(npc_count); // keeping all the npcs in the room in a vector (there are multiple npcs in the room)
     for (int i = 0; i < npc_count; i++)
     {
-        npcs[i] = new npc_data(tile_size, tile_size, room);
+        npcs[i] = new npc_data(tile_size, npc_model_size, room, "npc_idle");
         npcs[i]->set_zoom_level(game_size.get_zoom_level());
         npcs[i]->update(game_timing.get_delta_time(), room);
     }
+
+    // creating monster object
+    double monster_model_size = tile_size * 2.4;
+    monster_data monster(tile_size, npc_model_size, monster_model_size, room, "npc_idle", "monster");
+    monster.set_zoom_level(game_size.get_zoom_level());
+    monster.update(game_timing.get_delta_time(), room, player);
+
+    // setting up easing functions and objects to be used
+    ease_data highlight_ease;
+    highlight_ease.ease_func = &ease_out_quint;
+    highlight_ease.time_to_ease = 10000;
+
+    ease_data time_rate_ease;
+    time_rate_ease.ease_func = &ease_out_quint;
+
+    ease_data zoom_level_ease;
+    zoom_level_ease.ease_func = &ease_out_quint;
+
+    ease_data filter_ease;
+    filter_ease.ease_func = &ease_out_quint;
+
+    const color *color_array = room.get_color_pattern();
+    color floor_1 = color_array[0];
+    color floor_2 = color_array[1];
+    color wall = color_array[2];
+
+    // game loop
     while (!quit_requested())
     {
         // setting game timing
         game_timing.update_timing();
+        // skip frame if no time has passed (fast computers can have time difference of 0)
+        if (game_timing.get_time_difference() == 0)
+        {
+            continue;
+        }
 
-        // draw screen
-        clear_screen(rgb_color(150, 170, 200));
+        // clear screen
+        clear_screen(wall);
 
+        // updating player, npcs, and monster by calling their update functions, setting their zoom level, and checking for hitbox collision
         for (int i = 0; i < npc_count; i++)
         {
             npcs[i]->set_zoom_level(game_size.get_zoom_level());
             npcs[i]->update(game_timing.get_delta_time(), room);
+            npcs[i]->check_hitbox_collision(player.get_hitbox());
         }
 
         player.set_zoom_level(game_size.get_zoom_level());
+        player.update(game_timing.get_delta_time());
+        player.check_hitbox_collision(monster.get_hitbox());
 
+        monster.set_zoom_level(game_size.get_zoom_level());
+        monster.update(game_timing.get_delta_time(), room, player);
+        monster.check_hitbox_collision(player.get_hitbox());
+
+        // rebuilding the room to update the zoom level
         room.set_zoom_level(game_size.get_zoom_level());
         room.build_room();
 
+        // setting the camera position to the player's center position
         coordinate center_pos = game_size.get_camera_position(player.get_center_position());
         set_camera_position({center_pos.x, center_pos.y});
 
+        // drawing the room, npcs, player, and monster
         room.draw();
         for (int i = 0; i < npc_count; i++)
         {
-            npcs[i]->draw();
+            // only draw the npc if it is on the screen
+            if (rect_on_screen(npcs[i]->get_hurtbox()))
+            {
+                npcs[i]->draw();
+            }
         }
-        player.update(game_timing.get_delta_time());
-        player.draw();
+        // only draw the player if it is on the screen
+        if (rect_on_screen(player.get_hurtbox()))
+        {
+            player.draw();
+        }
+        // only draw the monster if it is on the screen
+        if (rect_on_screen(monster.get_hurtbox()))
+        {
+            monster.draw(highlight_ease, game_timing.get_time_difference());
+        }
 
-        control_player(player, game_timing, game_size, room, ease);
+        // drawing the time left on the screen (timer countdown)
+        draw_text(std::to_string(timer_countdown(time_limit)), color_green(), get_system_font(), window_height * 0.1, camera_position().x + ((double)window_width / 2.0), camera_position().y + ((double)window_height * 0.1));
 
+        // control functions for player and ability (focusing)
+        control_player(player, game_timing, room);
+        control_ability(game_timing, game_size, monster, time_rate_ease, zoom_level_ease, filter_ease);
+
+        // FIXME: delete test code
+        if (key_down(R_KEY))
+        {
+            monster.set_expose_self(true);
+        }
+        else
+        {
+            monster.set_expose_self(false);
+        }
+
+        // FIXME: delete test code
+        fill_rectangle(rgba_color(139.0, 0.0, 0.0, 0.15), camera_position().x, camera_position().y, game_size.get_screen_width(), game_size.get_screen_height());
+
+        // limit refresh screen for frame rate
         if (game_timing.update_frame())
         {
             refresh_screen();
