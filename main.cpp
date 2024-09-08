@@ -772,7 +772,7 @@ public:
     }
 
     // draw the character onto the screen
-    virtual void draw() const
+    void draw() const
     {
         if (get_health() <= 0)
         {
@@ -1399,7 +1399,7 @@ private:
 public:
     // Constructor
     monster_data(double tile_size, double model_disguise_size, double model_size, const room_data &room, string bitmap_disguise_name, string bitmap_name)
-        : character_data(1, 10 * tile_size / 1000, bitmap_named(bitmap_name), true, model_size, {0, 0})
+        : character_data(1, 15 * tile_size / 1000, bitmap_named(bitmap_name), true, model_size, {0, 0})
     {
         show_outline = false;
         expose_self = false;
@@ -1686,23 +1686,42 @@ void count_down_warning(double time_left, int time_start_warning, room_data &roo
     }
 }
 
+// function to draw the timer on the screen
 void draw_timer(double time_left, double window_width, double window_height)
 {
     // drawing the time left on the screen (timer countdown)
     string time_left_string = std::to_string(time_left);
 
-    int text_h = text_height(std::to_string(time_left), get_system_font(), window_height * 0.05);
-    int text_w = text_width(std::to_string(time_left), get_system_font(), window_height * 0.05);
+    int tailing_decmials = 4; // number of decimal places to show including the dot
+
+    // number of digits of the integer part of the time left
+    int int_digits;
+    if (time_left >= 10)
+    {
+        int_digits = 2; // numbers larger than or equal to 10 has 2 digits
+    }
+    if (time_left < 10)
+    {
+        int_digits = 1; // numbers smaller than 10 has 1 digit
+    }
+
+    time_left_string = time_left_string.substr(0, int_digits + tailing_decmials);
+
+    double font_size = window_height * 0.05;
+
+    int text_h = text_height(time_left_string, get_system_font(), font_size);
+    int text_w = text_width(time_left_string, get_system_font(), font_size);
 
     double text_pos_x = camera_position().x + ((double)window_width / 2.0);
-    double text_pos_y = camera_position().y + ((double)window_height * 0.05);
+    double text_pos_y = camera_position().y + ((double)font_size);
 
     double text_center_x = text_pos_x - (text_w / 2);
     double text_center_y = text_pos_y - (text_h / 2);
 
-    draw_text(std::to_string(time_left), color_white(), get_system_font(), window_height * 0.05, text_center_x, text_center_y);
+    draw_text(time_left_string, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
 }
 
+// function to handle game when the timer is out
 void timer_out(vector<npc_data *> &npcs, monster_data &monster)
 {
     // if the timer is out, the monster will be exposed
@@ -1715,8 +1734,46 @@ void timer_out(vector<npc_data *> &npcs, monster_data &monster)
     }
 }
 
+// function to draw the level text onto the screen
+void draw_level_text(int game_level, double window_width, double window_height)
+{
+    // drawing the level text on the screen
+    string level_text = "Level " + std::to_string(game_level);
+    double font_size = window_height * 0.025;
+
+    int text_h = text_height(level_text, get_system_font(), font_size);
+    int text_w = text_width(level_text, get_system_font(), font_size);
+
+    double text_pos_x = camera_position().x + ((double)window_width / 2.0);
+    double text_pos_y = camera_position().y + ((double)window_height * 0.1);
+
+    double text_center_x = text_pos_x - (text_w / 2);
+    double text_center_y = text_pos_y - (text_h / 2);
+
+    draw_text(level_text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
+}
+
+// function to draw the game's control info on the screen
+void draw_control_text(double window_width, double window_height)
+{
+    // drawing the control text on the screen
+    string control_text = "WASD to move | Space/Left Click to attack | Shift/Right Click to focus";
+    double font_size = window_height * 0.015;
+
+    int text_h = text_height(control_text, get_system_font(), font_size);
+    int text_w = text_width(control_text, get_system_font(), font_size);
+
+    double text_pos_x = camera_position().x + ((double)window_width * 0.5);
+    double text_pos_y = camera_position().y + ((double)window_height * 0.95);
+
+    double text_center_x = text_pos_x - (text_w / 2);
+    double text_center_y = text_pos_y - (text_h / 2);
+
+    draw_text(control_text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
+}
+
 // draw the end screen, either game won or game lost
-void draw_end_screen(bool game_won, bool game_lost, double window_width, double window_height)
+void draw_end_screen(string text, string sub_text, const color &bg_color, double window_width, double window_height)
 {
     // setting font sizes
     double font_size = window_height * 0.15;
@@ -1728,51 +1785,97 @@ void draw_end_screen(bool game_won, bool game_lost, double window_width, double 
 
     // pos_y2 is for the subtext
     double pos_y2 = camera_position().y + (((double)window_height / 3.0) * 2);
-
     // text and subtext will have the same x position
 
-    if (game_won)
+    double text_h = text_height(text, get_system_font(), font_size);
+    double text_w = text_width(text, get_system_font(), font_size);
+
+    double text_center_x = pos_x - (text_w / 2);
+    double text_center_y = pos_y - (text_h / 2);
+
+    double sub_text_h = text_height(sub_text, get_system_font(), font_size_small);
+    double sub_text_w = text_width(sub_text, get_system_font(), font_size_small);
+
+    double sub_text_center_x = pos_x - (sub_text_w / 2);
+    double sub_text_center_y = pos_y2 - (sub_text_h / 2);
+
+    fill_rectangle(bg_color, camera_position().x, camera_position().y, window_width, window_height);
+    draw_text(text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
+    draw_text(sub_text, color_white(), get_system_font(), font_size_small, sub_text_center_x, sub_text_center_y);
+}
+
+// generate random walls in the room
+void generate_random_walls(room_data &room, int wall_count)
+{
+    // NOTE: all coordinates used in here are tile coorindates, not pixel coordinates
+
+    // vector to store the walls' information (used to create the walls with rooms' set_wall function)
+    vector<rectangle> walls_info;
+    // generating random walls in the room
+    for (int i = 0; i < wall_count; i++)
     {
-        string text = "Level Complete!";
-        double text_h = text_height(text, get_system_font(), font_size);
-        double text_w = text_width(text, get_system_font(), font_size);
+        room.get_spawn_coords();
+        double wall_width = rnd(room.get_size_x() / 12, room.get_size_x() / 3);                                             // random width of the wall
+        double wall_height = rnd(room.get_size_y() / 12, room.get_size_y() / 3);                                            // random height of the wall
+        coordinate wall_pos = random_coordinate({0, 0}, {room.get_size_x() - wall_width, room.get_size_y() - wall_height}); // random position of the wall
 
-        double text_center_x = pos_x - (text_w / 2);
-        double text_center_y = pos_y - (text_h / 2);
-
-        string sub_text = "Press Esc to Continue";
-
-        double sub_text_h = text_height(sub_text, get_system_font(), font_size_small);
-        double sub_text_w = text_width(sub_text, get_system_font(), font_size_small);
-
-        double sub_text_center_x = pos_x - (sub_text_w / 2);
-        double sub_text_center_y = pos_y2 - (sub_text_h / 2);
-
-        fill_rectangle(rgba_color(255.0, 255.0, 255.0, 0.5), camera_position().x, camera_position().y, window_width, window_height);
-        draw_text(text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
-        draw_text(sub_text, color_white(), get_system_font(), font_size_small, sub_text_center_x, sub_text_center_y);
+        walls_info.push_back({wall_pos.x, wall_pos.y, wall_width, wall_height}); // storing the wall's information
     }
-    if (game_lost)
+
+    // expanding the walls by 1 tile, for checking collision
+    // walls cannot be closer than 2 tiles to each other
+    for (int i = 0; i < walls_info.size(); i++)
     {
-        string text = "Game Over!";
+        walls_info[i].x -= 1;
+        walls_info[i].y -= 1;
+        walls_info[i].width += 2;
+        walls_info[i].height += 2;
+    }
 
-        double text_h = text_height(text, get_system_font(), font_size);
-        double text_w = text_width(text, get_system_font(), font_size);
+    // creating a rectangle around the spawn tile
+    coordinate spawn_coords = room.get_spawn_coords();
+    coordinate spawn_tile = spawn_coords.pixel_to_tile(room.get_tile_size());
+    // the radius of the rectangle around the spawn tile
+    double spawn_radius = 3;
+    rectangle spawn_rectangle = {spawn_tile.x - spawn_radius, spawn_tile.y - spawn_radius, spawn_radius * 2.0, spawn_radius * 2.0};
 
-        double text_center_x = pos_x - (text_w / 2);
-        double text_center_y = pos_y - (text_h / 2);
+    // removing walls that intersect with the spawn rectangle, or intersect with each other (note the walls are expanded by 1 tile)
+    for (int i = 0; i < walls_info.size(); i++)
+    {
+        for (int j = 0; j < walls_info.size(); j++)
+        {
+            if (i == j)
+            {
+                continue;
+            }
 
-        string sub_text = "Press Esc to Restart";
+            // checking if the walls intersect with the spawn rectangle or each other (note that touching counts as intersecting)
+            if (rectangles_intersect(walls_info[j], spawn_rectangle) || rectangles_intersect(walls_info[i], walls_info[j]))
+            {
+                // if the walls intersect, remove the wall (by setting the sizes to 0)
+                walls_info[j].width = 0;
+                walls_info[j].height = 0;
+            }
+        }
+    }
 
-        double sub_text_h = text_height(sub_text, get_system_font(), font_size_small);
-        double sub_text_w = text_width(sub_text, get_system_font(), font_size_small);
+    // shrinking the walls back to their original size (by 1 tile)
+    for (int i = 0; i < walls_info.size(); i++)
+    {
+        walls_info[i].x += 1;
+        walls_info[i].y += 1;
+        walls_info[i].width -= 2;
+        walls_info[i].height -= 2;
+    }
 
-        double sub_text_center_x = pos_x - (sub_text_w / 2);
-        double sub_text_center_y = pos_y2 - (sub_text_h / 2);
-
-        fill_rectangle(rgba_color(129.0, 0.0, 0.0, 0.5), camera_position().x, camera_position().y, window_width, window_height);
-        draw_text(text, color_white(), get_system_font(), font_size, text_center_x, text_center_y);
-        draw_text(sub_text, color_white(), get_system_font(), font_size_small, sub_text_center_x, sub_text_center_y);
+    // setting the walls in the room
+    for (int i = 0; i < walls_info.size(); i++)
+    {
+        // if the width or height is 0, the wall is not set
+        if (walls_info[i].width > 0 || walls_info[i].height > 0)
+        {
+            room.set_wall({walls_info[i].x, walls_info[i].y}, {walls_info[i].x + walls_info[i].width, walls_info[i].y + walls_info[i].height});
+        }
     }
 }
 
@@ -1817,6 +1920,7 @@ int main()
 
         // building the room object
         room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
+        generate_random_walls(room, 10); // generating random walls in the room
         room.set_zoom_level(game_size.get_zoom_level());
         room.build_room();
         const color *color_array = room.get_color_pattern();
@@ -1933,8 +2037,18 @@ int main()
             control_player(player, game_timing, room);
             control_ability(game_timing, game_size, monster, time_rate_ease, zoom_level_ease, filter_ease);
 
+            // draw for the first 3 seconds of the game
+            if (timer_countdown(time_limit, timer_over) >= time_limit - 3000)
+            {
+                // drawing the level text on the screen
+                draw_level_text(game_level, window_width, window_height);
+                // drawing the control text on the screen
+                draw_control_text(window_width, window_height);
+            }
+
             // drawing the timer countdown on the screen
             draw_timer(timer_countdown(time_limit, timer_over) / 1000, window_width, window_height);
+
             // creating visual warnings as timer goes down
             count_down_warning(timer_countdown(time_limit, timer_over), 30000, room, initial_color_array, timer_warning_ease, game_timing.get_time_difference());
             // if one of the npcs is dead, the timer will run down to 0 instantly
@@ -1973,14 +2087,15 @@ int main()
         if (game_won)
         {
             game_level++;
+            draw_end_screen("Level Complete!", "Press Esc to continue", rgba_color(255.0, 255.0, 255.0, 0.5), window_width, window_height);
         }
 
         if (game_lost)
         {
             game_level = 1;
+            draw_end_screen("Game Over!", "Press Esc to restart", rgba_color(139.0, 0.0, 0.0, 0.5), window_width, window_height);
         }
 
-        draw_end_screen(game_won, game_lost, window_width, window_height);
         refresh_screen();
 
         while (!quit_requested() && !key_typed(ESCAPE_KEY))
@@ -1988,8 +2103,8 @@ int main()
             process_events();
         }
 
-        process_events();
         reset_timer("Main timer");
+        process_events();
     }
     // TODO: set random walls
     return 0;
