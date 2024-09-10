@@ -1,5 +1,4 @@
 #include "splashkit.h"
-#include <iostream>
 #include <cmath>
 #include <vector>
 
@@ -159,7 +158,7 @@ private:
 
 public:
     // Constructor
-    game_size_data(int screen_height, int screen_width, int room_width, int room_height)
+    game_size_data(int screen_width, int screen_height, int room_width, int room_height)
     {
         this->screen_height = screen_height;
         this->screen_width = screen_width;
@@ -1147,6 +1146,68 @@ private:
         sword_zoomed_model_scaling = sword.model_scaling * get_zoom_level();
     }
 
+    // update the sword's position to align with the player's position
+    void update_sword()
+    {
+        sword.phase = NO_SWORD; // default phase is no sword
+
+        update_sword_zoomed_model_scaling();
+
+        double player_model_width = bitmap_width(get_model());
+        double player_model_height = bitmap_height(get_model());
+
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+
+        double model_scaling = get_zoomed_model_scaling();
+
+        // making the sword align with the player
+        if (get_is_facing_right())
+        {
+            sword.position.x = get_zoomed_position().x + (player_model_width * model_scaling);
+            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
+        }
+        else
+        {
+            sword.position.x = get_zoomed_position().x - (sword_model_width * sword_zoomed_model_scaling);
+            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
+        }
+    }
+
+    // draw player's sword onto screen
+    void draw_sword() const
+    {
+        double sword_model_width = bitmap_width(sword.sword_draw_model);
+        double sword_model_height = bitmap_height(sword.sword_draw_model);
+        double scaling = sword_zoomed_model_scaling;
+
+        double player_model_height = bitmap_height(get_model());
+        double player_model_width = bitmap_width(get_model());
+
+        // fixing bitmap scaling position
+        double pos_x = sword.position.x + (((sword_model_width * scaling) - sword_model_width) / 2);
+        double pos_y = sword.position.y + (((sword_model_height * scaling) - sword_model_height) / 2);
+
+        sword_phase model = sword.phase;
+
+        double model_scaling = get_zoomed_model_scaling();
+
+        // flip when facing opposite direction
+        if (get_is_facing_right())
+        {
+            if (model == SWORD_DRAW)
+                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_scale_bmp(scaling, scaling));
+            if (model == SWORD_SWING)
+                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / (player_model_height / player_model_width) * model_scaling), option_scale_bmp(scaling, scaling));
+        }
+        else
+        {
+            if (model == SWORD_DRAW)
+                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_flip_y(option_scale_bmp(scaling, scaling)));
+            if (model == SWORD_SWING)
+                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / (player_model_height / player_model_width) * model_scaling), option_flip_y(option_scale_bmp(scaling, scaling)));
+        }
+    }
+
 public:
     // Constructor
     player_data(double tile_size, double model_size, const coordinate &spawn_coords, string bitmap_name)
@@ -1202,33 +1263,6 @@ public:
         }
     }
 
-    // update the sword's position to align with the player's position
-    void update_sword()
-    {
-        sword.phase = NO_SWORD; // default phase is no sword
-
-        update_sword_zoomed_model_scaling();
-
-        double player_model_width = bitmap_width(get_model());
-        double player_model_height = bitmap_height(get_model());
-
-        double sword_model_width = bitmap_width(sword.sword_draw_model);
-
-        double model_scaling = get_zoomed_model_scaling();
-
-        // making the sword align with the player
-        if (get_is_facing_right())
-        {
-            sword.position.x = get_zoomed_position().x + (player_model_width * model_scaling);
-            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
-        }
-        else
-        {
-            sword.position.x = get_zoomed_position().x - (sword_model_width * sword_zoomed_model_scaling);
-            sword.position.y = get_zoomed_position().y + (player_model_height / (player_model_height / player_model_width) * model_scaling);
-        }
-    }
-
     // must be ran inside game loop, and get delta_time from game_timing_data
     void update(double delta_time)
     {
@@ -1257,41 +1291,6 @@ public:
         return hitbox;
     }
 
-    // draw player's sword onto screen
-    void draw_sword() const
-    {
-        double sword_model_width = bitmap_width(sword.sword_draw_model);
-        double sword_model_height = bitmap_height(sword.sword_draw_model);
-        double scaling = sword_zoomed_model_scaling;
-
-        double player_model_height = bitmap_height(get_model());
-        double player_model_width = bitmap_width(get_model());
-
-        // fixing bitmap scaling position
-        double pos_x = sword.position.x + (((sword_model_width * scaling) - sword_model_width) / 2);
-        double pos_y = sword.position.y + (((sword_model_height * scaling) - sword_model_height) / 2);
-
-        sword_phase model = sword.phase;
-
-        double model_scaling = get_zoomed_model_scaling();
-
-        // flip when facing opposite direction
-        if (get_is_facing_right())
-        {
-            if (model == SWORD_DRAW)
-                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_scale_bmp(scaling, scaling));
-            if (model == SWORD_SWING)
-                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / (player_model_height / player_model_width) * model_scaling), option_scale_bmp(scaling, scaling));
-        }
-        else
-        {
-            if (model == SWORD_DRAW)
-                draw_bitmap(sword.sword_draw_model, pos_x, pos_y, option_flip_y(option_scale_bmp(scaling, scaling)));
-            if (model == SWORD_SWING)
-                draw_bitmap(sword.sword_swing_model, pos_x, pos_y - (player_model_height / (player_model_height / player_model_width) * model_scaling), option_flip_y(option_scale_bmp(scaling, scaling)));
-        }
-    }
-
     void draw() const
     {
 
@@ -1312,7 +1311,6 @@ class monster_data : public character_data
 private:
     // outline of the monster when disguised (or highlight)
     bool show_outline;
-    ease_data ease_outline;
 
     // if the monster is exposed, it will be drawn, if not, the disguise will be drawn
     bool expose_self;
@@ -1360,7 +1358,7 @@ private:
     }
 
     // chase the player by moving directly towards the player, used when the monster is exposed
-    void chase_player(int delta_time, const player_data &player, const room_data &room)
+    void chase_player(double delta_time, const player_data &player, const room_data &room)
     {
         vector_2d direction = {0, 0};
         direction.x = player.get_center_position().x - get_center_position().x;
@@ -1377,7 +1375,7 @@ private:
         }
 
         // the distance the monster will move according to delta_time
-        double distance = get_speed() * (double)delta_time;
+        double distance = get_speed() * delta_time;
 
         move(direction, distance, room);
     }
@@ -1881,6 +1879,11 @@ void generate_random_walls(room_data &room, int wall_count)
 
 int main()
 {
+    // set up game variables
+    const int WINDOW_WIDTH = 1920;
+    const int WINDOW_HEIGHT = 1080;
+    const int FRAME_RATE = 120;
+
     // load bitmaps
     load_bitmap("vignette", "./image_data/vignette/vignette.png");
     load_bitmap("player_idle", "./image_data/player/player_idle.png");
@@ -1889,16 +1892,11 @@ int main()
     load_bitmap("npc_idle", "./image_data/npc/npc_idle.png");
     load_bitmap("monster", "./image_data/monster/monster.png");
 
-    // set up game variables
-    int game_level = 1; // starts at level 1, increases by 1 each level
-    int window_width = 1920;
-    int window_height = 1080;
-    int frame_rate = 120;
-
     // open window
-    open_window("Find The Fake", window_width, window_height);
+    open_window("Find The Fake", WINDOW_WIDTH, WINDOW_HEIGHT);
     create_timer("Main timer");
     start_timer("Main timer");
+    int game_level = 1; // starts at level 1, increases by 1 each level
 
     while (!quit_requested())
     {
@@ -1915,8 +1913,8 @@ int main()
         int npc_count = game_level + 1; // number of npcs increases by 1 each level
 
         // creating game objects
-        game_size_data game_size(window_height, window_width, room_width, room_height);
-        game_timing_data game_timing(frame_rate);
+        game_size_data game_size(WINDOW_WIDTH, WINDOW_HEIGHT, room_width, room_height);
+        game_timing_data game_timing(FRAME_RATE);
 
         // building the room object
         room_data room(game_size.get_room_width(), game_size.get_room_height(), game_size.get_screen_width(), game_size.get_screen_height());
@@ -2041,13 +2039,13 @@ int main()
             if (timer_countdown(time_limit, timer_over) >= time_limit - 3000)
             {
                 // drawing the level text on the screen
-                draw_level_text(game_level, window_width, window_height);
+                draw_level_text(game_level, WINDOW_WIDTH, WINDOW_HEIGHT);
                 // drawing the control text on the screen
-                draw_control_text(window_width, window_height);
+                draw_control_text(WINDOW_WIDTH, WINDOW_HEIGHT);
             }
 
             // drawing the timer countdown on the screen
-            draw_timer(timer_countdown(time_limit, timer_over) / 1000, window_width, window_height);
+            draw_timer(timer_countdown(time_limit, timer_over) / 1000, WINDOW_WIDTH, WINDOW_HEIGHT);
 
             // creating visual warnings as timer goes down
             count_down_warning(timer_countdown(time_limit, timer_over), 30000, room, initial_color_array, timer_warning_ease, game_timing.get_time_difference());
@@ -2087,13 +2085,13 @@ int main()
         if (game_won)
         {
             game_level++;
-            draw_end_screen("Level Complete!", "Press Esc to continue", rgba_color(255.0, 255.0, 255.0, 0.5), window_width, window_height);
+            draw_end_screen("Level Complete!", "Press Esc to continue", rgba_color(255.0, 255.0, 255.0, 0.5), WINDOW_WIDTH, WINDOW_HEIGHT);
         }
 
         if (game_lost)
         {
             game_level = 1;
-            draw_end_screen("Game Over!", "Press Esc to restart", rgba_color(139.0, 0.0, 0.0, 0.5), window_width, window_height);
+            draw_end_screen("Game Over!", "Press Esc to restart", rgba_color(139.0, 0.0, 0.0, 0.5), WINDOW_WIDTH, WINDOW_HEIGHT);
         }
 
         refresh_screen();
@@ -2106,6 +2104,5 @@ int main()
         reset_timer("Main timer");
         process_events();
     }
-    // TODO: set random walls
     return 0;
 }
